@@ -1,0 +1,174 @@
+x-common-vars: &common-vars
+  GLA1V3_DOMAIN: gla1v3.local
+  TRAEFIK_TAG: traefik
+  LETSENCRYPT_EMAIL: test@test.com
+
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-data:/data
+      - traefik-logs:/logs
+      - ./certs:/etc/traefik/certs:ro # our local CA + agent client certs will live here
+    environment:
+      - GLA1V3_DOMAIN
+    command: 
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.c2.address=:4443 # dedicated entrypoint for agents (mTLS only)
+
+      # ──────────────────────────────
+      # LOCAL DEV MODE (default right now)
+      # ──────────────────────────────
+      - --tls.stores.default.defaultcertificate.certfile=/etc/traefik/certs/server.crt
+      - --tls.stores.default.defaultcertificate.keyfile=/etc/traefik/certs/server.key
+
+      # ──────────────────────────────
+      # PRODUCTION MODE (uncomment these 4 lines when you go public, comment the 2 lines above)
+      # ──────────────────────────────
+      #- --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
+      #- --certificatesresolvers.le.acme.storage=/data/acme.json
+      #- --certificatesresolvers.le.acme.tlschallenge=true
+      # Use staging during development to avoid rate limits
+      #- --certificatesresolvers.le.acme.caServer=https://acme-staging-v02.api.letsencrypt.org/directory
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host('traefik.${GLA1V3_DOMAIN}')"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.tls=true" # works with both local cert and LE
+    networks:
+      - gla1v3-net
+  
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gla1v3
+      POSTGRES_USER: gla1v3 # Change later
+      POSTGRES_PASSWORD: gla1v3password # Change later
+      GLA1V3_DOMAIN: gla1v3.local
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    labels:
+      - "traefik.enable=false" # internal only
+    networks:
+      - gla1v3-net
+  
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+    labels:
+      - "traefik.enable=false" # internal only
+    networks:
+      - gla1v3-net
+  
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.8.2 # latest stable as of Nov 2025
+    container_name: wazuh-manager
+    restart: unless-stopped
+    environment:
+      - INDEXER_URL=https://wazuh-indexer:9200
+      - INDEXER_USERNAME=admin # Change later
+      - INDEXER_PASSWORD=admin_password # Change later
+      - FILEBEAT_SSL_VERIFICATION=false
+      - WAZUH_API_HTTPS=true
+    depends_on:
+      - wazuh-indexer
+    volumes:
+      - wazuh-etc:/var/ossec/etc
+      - wazuh-data:/var/ossec/data
+    #ports:
+      # Comment in when needed
+      #- "55000:55000" # agent enrollment
+      #- "1514:1514/udp" # agent syslog
+      #- "1515:1515" # agent registration
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.wazuh.rule=Host('wazuh.${GLA1V3_DOMAIN}')"
+      # Makes wazuh dashboard HTTPS only
+      - "traefik.http.routers.wazuh.tls=true" 
+      - "traefik.http.services.wazuh.loadbalancer.server.port=5601" # Dashboard port
+    networks:
+      - gla1v3-net
+  
+  wazuh-indexer:
+    image: wazuh/wazuh-indexer:4.8.2
+    container_name: wazuh-indexer
+    restart: unless-stopped
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+    volumes:
+      - wazuh-indexer-data:/var/lib/opensearch
+    labels:
+      - "traefik.enable=false" # internal only
+    networks:
+      - gla1v3-net
+
+  backend:
+    build: ../backend
+    container_name: backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://gla1v3:gla1v3password@postgres:5432/gla1v3
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host('api.${GLA1V3_DOMAIN}')"
+      - "traefik.http.routers.api.tls=true"
+      - "traefik.http.routers.api.service=api"
+      - "traefik.http.services.api.loadbalancer.server.port=3000"
+    # mTLS entrypoint for agents only
+      - "traefik.http.routers.c2.rule=Host('c2.${GLA1V3_DOMAIN}')"
+      - "traefik.http.routers.c2.entrypoints=c2"
+      - "traefik.http.routers.c2.tls=true"
+      - "traefik.http.routers.c2.tls.clientca.files=/etc/traefik/certs/agent-ca.crt"
+      - "traefik.http.routers.c2.service=c2"
+      - "traefik.http.services.c2.loadbalancer.server.port=3001" # future websocket port
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - gla1v3-net
+  
+  frontend:
+    build: ../frontend
+    container_name: frontend
+    restart: unless-stopped
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host('dashboard.${GLA1V3_DOMAIN}') || Host('${GLA1V3_DOMAIN}')"
+      - "traefik.http.routers.dashboard.tls.certresolver=le"
+      - "traefik.http.routers.dashboard.loadbalancer.server.port=5173"
+    networks:
+      - gla1v3-net
+
+networks:
+  gla1v3-net:
+    driver: bridge
+
+volumes:
+  traefik-data:
+  traefik-logs:
+  postgres-data:
+  redis-data:
+  wazuh-etc:
+  wazuh-data:
+  wazuh-indexer-data:

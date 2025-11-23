@@ -1,0 +1,2 @@
+[req_ext]
+subjectAltName = DNS:*.gla1v3.local,DNS:gla1v3.local
