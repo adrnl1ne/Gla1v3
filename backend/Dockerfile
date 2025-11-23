@@ -1,15 +1,12 @@
 FROM node:20-alpine
 
-WORKDIR /src
+WORKDIR /app
 
-# Copy package files if you have them (won’t break even if you don’t)
 COPY package*.json ./
-
-# Install dependencies (will do nothing if no package.json)
 RUN npm install || true
 
-# Copy everything else
 COPY . .
 
-# Default command (safe, does nothing harmful if no script exists)
+EXPOSE 3000 3001
+
 CMD ["node", "index.js"]

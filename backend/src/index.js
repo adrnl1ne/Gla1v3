@@ -1,1 +1,0 @@
-app.get('/ping', require('./ping'));

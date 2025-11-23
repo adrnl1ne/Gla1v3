@@ -1,0 +1,18 @@
+entryPoints:
+  websecure:
+    address: ":443"
+  c2:
+    address: ":4443" # dedicated entrypoint for agents (mTLS only)
+
+certificates:
+  - certFile: /etc/traefik/certs/c2.gla1v3.local.crt
+    keyFile: /etc/traefik/certs/c2.gla1v3.local.key
+    stores:
+      - default
+
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/c2.gla1v3.local.crt
+        keyFile: /etc/traefik/certs/c2.gla1v3.local.key
