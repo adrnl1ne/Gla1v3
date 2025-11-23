@@ -1,7 +1,6 @@
 FROM node:20-alpine
 
-# Create app directory
-WORKDIR /app
+WORKDIR /src
 
 # Copy package files if you have them (won’t break even if you don’t)
 COPY package*.json ./
