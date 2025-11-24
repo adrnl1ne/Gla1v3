@@ -17,8 +17,6 @@ app.get('/health', (req, res) => res.send('OK'));
 
 app.get('/beacon', (req, res) => {
   const agentID = req.headers['x-agent-id'] || 'unknown';
-
-  // Traefik v2.10 uses THIS header (not x-client-certificate)
   const clientCertPEM = req.headers['ssl-client-cert'] || req.headers['x-client-cert'];
 
   let cn = 'no-cert';
@@ -31,21 +29,22 @@ app.get('/beacon', (req, res) => {
     }
   }
   console.log(`BEACON SUCCESS → ID: ${agentID} | CN: ${cn}`);
-  res.send('Gla1v3 C2 alive');
-});
+ 
+  // Create or Update Agent
+  const now = new Date().toISOString();
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
 
+  agents.set(agentID, {
+    id: agentID,
+    cn,
+    ip,
+    firstSeen: agents.has(agentID) ? agents.get(agentID).firstSeen : now,
+    lastSeen: now,
+    beaconCount: (agents.get(agentID)?.beaconCount || 0) + 1
+  });
 
-// Create or Update Agent
-const now = new Date().toISOString();
-const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+   res.send('Gla1v3 C2 alive');
 
-agents.set(agentID, {
-  id: agentID,
-  cn,
-  ip,
-  firstSeen: agents.has(agentID) ? agents.get(agentID).firstSeen : now,
-  lastSeen: now,
-  beaconCount: (agents.get(agentID)?.beaconCount || 0) + 1
 });
 
 // Dashboard endpoint
