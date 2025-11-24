@@ -1,29 +1,34 @@
 const express = require('express');
 const app = express();
-const http = require('http');
 
+// Log every request
+app.use((req, res, next) => {
+  console.log(`\nINCOMING → ${req.method} ${req.url} on port ${req.socket.localPort}`);
+  console.log('HEADERS:', req.headers);
+  next();
+});
 
-// Allow Traefik to perform health checks
 app.get('/health', (req, res) => res.send('OK'));
 
-// Ping Endpoint
 app.get('/beacon', (req, res) => {
-    const agentID = req.headers['x-agent-id'] || 'unknown';
-    const cert = req.socket.getPeerCertificate();
-    const clientCN = cert && cert.subject ? cert.subject.CN : 'unknown';
-    console.log(`AGENT BEACON -> ID: ${agentID} | Cert CN: ${clientCN}`);
-    res.send('Gla1v3 C2 alive');
+  const agentID = req.headers['x-agent-id'] || 'unknown';
+
+  // Traefik v2.10 uses THIS header (not x-client-certificate)
+  const clientCertPEM = req.headers['ssl-client-cert'] || req.headers['x-client-cert'];
+
+  let cn = 'no-cert';
+  if (clientCertPEM) {
+    try {
+      const match = clientCertPEM.match(/CN=([^\/\n,]+)/);
+      cn = match ? match[1] : 'cert-present-no-cn';
+    } catch (e) {
+      cn = 'parse-error';
+    }
+  }
+
+  console.log(`BEACON SUCCESS → ID: ${agentID} | CN: ${cn}`);
+  res.send('Gla1v3 C2 alive');
 });
 
-// Start two Listener servers
-    const server3000 = http.createServer(app);
-    const server3001 = http.createServer(app);
-
-
-server3000.listen(3000, '0.0.0.0', () => {
-    console.log(`API Server listening on : 3000`);
-});
-
-server3001.listen(3001, '0.0.0.0', () => {
-    console.log(`Gla1v3 C2 Server listener ready on : 3001 (mTLS)`);
-});
+app.listen(3000, '0.0.0.0', () => console.log('API ready on :3000'));
+app.listen(3001, '0.0.0.0', () => console.log('C2 mTLS ready on :3001'));

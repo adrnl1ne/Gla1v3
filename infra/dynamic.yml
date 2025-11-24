@@ -1,0 +1,20 @@
+# dynamic.yml – Dynamic v2.10 config (NEW: proper mTLS options + wildcard cert)
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/server.crt
+        keyFile: /etc/traefik/certs/server.key
+  options:
+    mtls:
+      clientAuth:
+        caFiles:
+          - /etc/traefik/certs/ca.crt
+        clientAuthType: RequireAndVerifyClientCert
+
+http:
+  middlewares:
+    forward-client-cert:
+      headers:
+        customRequestHeaders:
+          ssl-client-cert: "%[req.ssl_client_cert]"
