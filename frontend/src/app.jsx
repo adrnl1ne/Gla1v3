@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react';
 
 function App() {
-    const [agents, setAgents] =useState([]);
+    const [agents, setAgents] = useState([]);
 
     useEffect(() => {
         const fetchAgents = async () => {
             try {
                 const res = await fetch('https://api.gla1v3.local/api/agents');
                 const data = await res.json();
+                setAgents(data);
             } catch (e) {
-                console.error('Failed to fecth agents', e)
+                console.error('Failed to fetch agents', e)
             }
         };
 
@@ -20,7 +21,7 @@ function App() {
 
     return (
         <div style={{ padding: '2rem', fontFamily: 'monospace', background: '#0d1117', color: '#c9d1d9', minHeight: '100vh' }}>
-      <h1 style={{ color: '#58a6ff' }}>GLA1V3 — LIVE AGENTS</h1>
+      <h1 style={{ color: '#58a6ff' }}>GLA1V3 -- LIVE AGENTS</h1>
       <p>Beaconing agents: {agents.length}</p>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>

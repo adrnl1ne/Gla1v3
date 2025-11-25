@@ -1,12 +1,21 @@
-# dynamic.yml – Dynamic v2.10 config (NEW: proper mTLS options + wildcard cert)
 tls:
   stores:
     default:
       defaultCertificate:
         certFile: /etc/traefik/certs/server.crt
         keyFile: /etc/traefik/certs/server.key
+  certificates:
+    - certFile: /etc/traefik/certs/c2.gla1v3.local.crt
+      keyFile: /etc/traefik/certs/c2.gla1v3.local.key
+      stores:
+        - default
+    - certFile: /etc/traefik/certs/server.crt
+      keyFile: /etc/traefik/certs/server.key
+      stores:
+        - default
   options:
-    mtls:
+    default: {}
+    mtls-required:
       clientAuth:
         caFiles:
           - /etc/traefik/certs/ca.crt

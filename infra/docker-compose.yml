@@ -1,5 +1,3 @@
-version: "3.9"
-
 x-common-vars: &common-vars
   GLA1V3_DOMAIN: gla1v3.local
 
@@ -122,7 +120,8 @@ services:
       - "traefik.http.routers.c2.rule=Host(`c2.${GLA1V3_DOMAIN}`)"
       - "traefik.http.routers.c2.entrypoints=c2"
       - "traefik.http.routers.c2.tls=true"
-      - "traefik.http.routers.c2.tls.options=mtls@file"  # ← FIXED: Reference dynamic.yml options (v2.10 way – was v3 syntax before)
+      #- "traefik.http.routers.c2.tls.options=default"
+      - "traefik.http.routers.c2.tls.options=mtls-required"
       - "traefik.http.routers.c2.service=c2"
       - "traefik.http.services.c2.loadbalancer.server.port=3001"  # Forwards to backend /beacon
       - "traefik.http.routers.c2.middlewares=forward-client-cert@file"
@@ -143,7 +142,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.dashboard.rule=Host(`dashboard.${GLA1V3_DOMAIN}`) || Host(`${GLA1V3_DOMAIN}`)"
-      - "traefik.http.routers.dashboard.tls=true"  # ← FIXED: Use true (uses default store from dynamic.yml – was certresolver=le, which is v3)
+      - "traefik.http.routers.dashboard.tls=true"
       - "traefik.http.services.dashboard.loadbalancer.server.port=5173"
     networks:
       - gla1v3-net
