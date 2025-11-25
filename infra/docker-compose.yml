@@ -121,7 +121,7 @@ services:
       - "traefik.http.routers.c2.entrypoints=c2"
       - "traefik.http.routers.c2.tls=true"
       #- "traefik.http.routers.c2.tls.options=default"
-      - "traefik.http.routers.c2.tls.options=mtls-required"
+      - "traefik.http.routers.c2.tls.options=mtls-required@file"
       - "traefik.http.routers.c2.service=c2"
       - "traefik.http.services.c2.loadbalancer.server.port=3001"  # Forwards to backend /beacon
       - "traefik.http.routers.c2.middlewares=forward-client-cert@file"
