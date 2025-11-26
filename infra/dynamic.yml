@@ -21,9 +21,18 @@ tls:
           - /etc/traefik/certs/ca.crt
         clientAuthType: RequireAndVerifyClientCert
 
-http:
-  middlewares:
-    forward-client-cert:
-      headers:
-        customRequestHeaders:
-          ssl-client-cert: "%[req.ssl_client_cert]"
+tcp:
+  routers:
+    c2:
+      entryPoints:
+        - c2
+      rule: "HostSNI(`c2.gla1v3.local`)"
+      service: c2
+      tls:
+        passthrough: true
+        options: mtls-required
+  services:
+    c2:
+      loadBalancer:
+        servers:
+          - address: backend:3001
