@@ -71,4 +71,3 @@ function Splash({ onEnter }) {
 }
 
 export default Splash;
-// ...existing code ends here
