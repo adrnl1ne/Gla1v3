@@ -3,6 +3,7 @@ import WorldMap from './WorldMap';
 
 export default function Dashboard() {
   const [agents, setAgents] = useState([]);
+  const [selectedAgent, setSelectedAgent] = useState(null);
 
   useEffect(() => {
     const fetchAgents = async () => {
@@ -36,9 +37,23 @@ export default function Dashboard() {
       </header>
 
       <div style={{ flex: 1, display: 'flex', gap: '1rem', padding: '1rem' }}>
-        {/* World Map — 60% width */}
-        <div style={{ flex: '0 0 60%', background: '#161b22', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
-          <WorldMap agents={agents} getColor={getColor} />
+        {/* World Map — show only when an agent is selected */}
+        <div style={{ flex: '0 0 60%', background: '#161b22', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column' }}>
+          {selectedAgent ? (
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0.5rem 1rem' }}>
+                <button onClick={() => setSelectedAgent(null)} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 10px', borderRadius: 6, cursor: 'pointer' }}>Close Map</button>
+              </div>
+              <div style={{ flex: 1 }}>
+                <WorldMap agent={selectedAgent} getColor={getColor} />
+              </div>
+            </div>
+          ) : (
+            <div style={{ padding: '1.5rem', color: '#9aa4b2' }}>
+              <h3 style={{ marginTop: 0 }}>Map — agent-based view</h3>
+              <p>Select an agent from the list to view its location on the map.</p>
+            </div>
+          )}
         </div>
 
         {/* Agent Table — 40% width */}
@@ -51,6 +66,7 @@ export default function Dashboard() {
                 <th style={{ textAlign: 'left', padding: '0.8rem' }}>ID</th>
                 <th style={{ textAlign: 'left', padding: '0.8rem' }}>CN</th>
                 <th style={{ textAlign: 'left', padding: '0.8rem' }}>Last</th>
+                <th style={{ textAlign: 'left', padding: '0.8rem' }}>Last Action</th>
               </tr>
             </thead>
             <tbody>
@@ -64,6 +80,17 @@ export default function Dashboard() {
                     <td style={{ padding: '0.8rem', fontFamily: 'monospace' }}>{a.id}</td>
                     <td style={{ padding: '0.8rem', color: '#ff7b72' }}>{a.cn}</td>
                     <td style={{ padding: '0.8rem' }}>{new Date(a.lastSeen).toLocaleTimeString()}</td>
+                    <td style={{ padding: '0.8rem', maxWidth: 240, whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                      <div style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}>{a.lastAction || '—'}</div>
+                      <div style={{ color: '#9ae6b4', fontSize: '0.8rem', marginTop: '0.25rem' }}>{a.detection || ''} <span style={{ background: '#1f6feb', color: '#fff', padding: '2px 6px', borderRadius: 4, marginLeft: 6 }}>D3-PCA</span></div>
+                    </td>
+                    <td style={{ padding: '0.8rem', textAlign: 'center' }}>
+                      {a.lat && a.lng ? (
+                        <button onClick={() => setSelectedAgent(a)} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 8px', borderRadius: 6, cursor: 'pointer' }}>Show Map</button>
+                      ) : (
+                        <button disabled style={{ background: '#262b31', border: '1px solid #202428', color: '#6b6f74', padding: '6px 8px', borderRadius: 6 }}>No Geo</button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
