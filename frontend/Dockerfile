@@ -1,10 +1,12 @@
 FROM node:20-alpine
+
 WORKDIR /app
 
-RUN mkdir -p build
-RUN echo "<h1>Placeholder frontend</h1>" > build/index.html
+COPY package*.json ./
+RUN npm install
 
-RUN npm install -g serve
+COPY . .
 
-EXPOSE 3000
-CMD ["serve", "-s", "build", "-l", "3000"]
+EXPOSE 5173
+
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

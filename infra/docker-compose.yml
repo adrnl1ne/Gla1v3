@@ -1,5 +1,3 @@
-version: "3.9"
-
 x-common-vars: &common-vars
   GLA1V3_DOMAIN: gla1v3.local
 
@@ -108,24 +106,31 @@ services:
       - DATABASE_URL=postgresql://gla1v3:gla1v3password@postgres:5432/gla1v3
       - GLA1V3_DOMAIN=gla1v3.local  # ← ADDED: Full value for labels
     volumes:
-      - ../backend:/app
-      - /app/node_modules
+      - ../certs:/app/certs:ro
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=Host(`api.${GLA1V3_DOMAIN}`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls=true"
+      - "traefik.http.routers.api.service=api"
       - "traefik.http.services.api.loadbalancer.server.port=3000"
+
+      # Public health endpoint on :443 (no mTLS)
+      - "traefik.http.routers.health.rule=Host(`c2.${GLA1V3_DOMAIN}`) && Path(`/health`)"
+      - "traefik.http.routers.health.entrypoints=websecure"
+      - "traefik.http.routers.health.tls=true"
+      - "traefik.http.routers.health.service=api"
 
       # ──────────────────────────────
       # C2 mTLS ENDPOINT – FIXED SYNTAX FOR v2.10
       # ──────────────────────────────
-      - "traefik.http.routers.c2.rule=Host(`c2.${GLA1V3_DOMAIN}`)"
-      - "traefik.http.routers.c2.entrypoints=c2"
-      - "traefik.http.routers.c2.tls=true"
-      - "traefik.http.routers.c2.tls.options=mtls@file"  # ← FIXED: Reference dynamic.yml options (v2.10 way – was v3 syntax before)
-      - "traefik.http.routers.c2.service=c2"
-      - "traefik.http.services.c2.loadbalancer.server.port=3001"  # Forwards to backend /beacon
-      - "traefik.http.routers.c2.middlewares=forward-client-cert@file"
+      #- "traefik.http.routers.c2.rule=Host(`c2.${GLA1V3_DOMAIN}`)"
+      #- "traefik.http.routers.c2.entrypoints=c2"
+      #- "traefik.http.routers.c2.tls=true"
+      #- "traefik.http.routers.c2.tls.options=mtls-required@file"
+      #- "traefik.http.routers.c2.service=c2"
+      #- "traefik.http.services.c2.loadbalancer.server.port=3001"  # Forwards to backend /beacon
+      #- "traefik.http.routers.c2.middlewares=forward-client-cert@file"
 
     depends_on:
       - postgres
@@ -137,13 +142,10 @@ services:
     build: ../frontend
     container_name: frontend
     restart: unless-stopped
-    volumes:
-      - ../frontend:/app
-      - /app/node_modules
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.dashboard.rule=Host(`dashboard.${GLA1V3_DOMAIN}`) || Host(`${GLA1V3_DOMAIN}`)"
-      - "traefik.http.routers.dashboard.tls=true"  # ← FIXED: Use true (uses default store from dynamic.yml – was certresolver=le, which is v3)
+      - "traefik.http.routers.dashboard.tls=true"
       - "traefik.http.services.dashboard.loadbalancer.server.port=5173"
     networks:
       - gla1v3-net

@@ -7,6 +7,8 @@ entryPoints:
     address: ":443"  # Normal HTTPS traffic
   c2:
     address: ":4443"  # mTLS for agents (Gla1v3-specific)
+    forwardedHeaders:
+      insecure: true
 
 providers:
   docker:
