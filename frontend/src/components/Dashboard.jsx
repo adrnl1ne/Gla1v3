@@ -28,6 +28,7 @@ export default function Dashboard() {
   };
 
   const [showRaw, setShowRaw] = useState(false);
+  const [showMapModal, setShowMapModal] = useState(false);
 
   return (
     <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', background: '#0d1117', color: '#c9d1d9', margin: 0, padding: 0, overflow: 'hidden', position: 'fixed', top: 0, left: 0, boxSizing: 'border-box' }}>
@@ -39,30 +40,12 @@ export default function Dashboard() {
       </header>
 
       <div style={{ flex: 1, display: 'flex', gap: '1rem', padding: '1rem' }}>
-        {/* World Map — show only when an agent is selected */}
-        <div style={{ flex: '0 0 60%', background: '#161b22', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column' }}>
-          {selectedAgent ? (
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0.5rem 1rem' }}>
-                <button onClick={() => setSelectedAgent(null)} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 10px', borderRadius: 6, cursor: 'pointer' }}>Close Map</button>
-              </div>
-              <div style={{ flex: 1 }}>
-                <WorldMap agent={selectedAgent} getColor={getColor} />
-              </div>
-            </div>
-          ) : (
-            <div style={{ flex: 1 }}>
-              {/* Show the global world map with all agents when no agent is selected */}
-              <WorldMap agents={agents} getColor={getColor} />
-            </div>
-          )}
-        </div>
-
-        {/* Agent Table — 40% width */}
+        {/* Agent Table — primary view */}
         <div style={{ flex: 1, background: '#161b22', borderRadius: '12px', padding: '1.5rem', overflow: 'auto', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
           <h2 style={{ marginTop: 0, color: '#58a6ff' }}>Agent Status</h2>
-          <div style={{ marginBottom: '0.75rem' }}>
+          <div style={{ marginBottom: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <button onClick={() => setShowRaw(s => !s)} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 8px', borderRadius: 6, cursor: 'pointer' }}>{showRaw ? 'Hide' : 'Show'} Raw Agents</button>
+            <button onClick={() => { setSelectedAgent(null); setShowMapModal(true); }} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 8px', borderRadius: 6, cursor: 'pointer' }}>Open Map</button>
           </div>
           {showRaw && (
             <pre style={{ background: '#0b1220', color: '#c9d1d9', padding: '0.75rem', borderRadius: 6, maxHeight: 200, overflow: 'auto', fontSize: '0.8rem' }}>{JSON.stringify(agents, null, 2)}</pre>
@@ -100,7 +83,7 @@ export default function Dashboard() {
                     </td>
                     <td style={{ padding: '0.8rem', textAlign: 'center' }}>
                       {hasGeo ? (
-                        <button onClick={() => setSelectedAgent(a)} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 8px', borderRadius: 6, cursor: 'pointer' }}>Show Map</button>
+                        <button onClick={() => { setSelectedAgent(a); setShowMapModal(true); }} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 8px', borderRadius: 6, cursor: 'pointer' }}>Show Map</button>
                       ) : (
                         <button disabled style={{ background: '#262b31', border: '1px solid #202428', color: '#6b6f74', padding: '6px 8px', borderRadius: 6 }}>No Geo</button>
                       )}
@@ -111,7 +94,30 @@ export default function Dashboard() {
             </tbody>
           </table>
         </div>
+
+        {/* Logistics panel removed per UX request */}
       </div>
+
+      {/* Map Modal */}
+      {showMapModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ width: '90vw', height: '85vh', background: '#0f1720', borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 48px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 1rem', borderBottom: '1px solid #20303a' }}>
+              <div style={{ color: '#58a6ff', fontWeight: '600' }}>{selectedAgent ? `Map — ${selectedAgent.id}` : 'Global Agent Map'}</div>
+              <div>
+                <button onClick={() => { setShowMapModal(false); setSelectedAgent(null); }} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 10px', borderRadius: 6, cursor: 'pointer' }}>Close</button>
+              </div>
+            </div>
+            <div style={{ flex: 1 }}>
+              {selectedAgent ? (
+                <WorldMap agent={selectedAgent} getColor={getColor} />
+              ) : (
+                <WorldMap agents={agents} getColor={getColor} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
