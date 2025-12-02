@@ -105,6 +105,8 @@ services:
       - NODE_ENV=development
       - DATABASE_URL=postgresql://gla1v3:gla1v3password@postgres:5432/gla1v3
       - GLA1V3_DOMAIN=gla1v3.local  # ← ADDED: Full value for labels
+      # Secure token for agent whoami endpoint. Change as needed; kept here for POC.
+      - AGENT_WHOAMI_TOKEN=3f7b9a2d8c1e4f6a9b0c2d3e4f5a6b7c
       - WAZUH_URL=https://wazuh-manager:55000
       - WAZUH_USER=wazuh
       - WAZUH_PASS=changeme

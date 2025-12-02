@@ -172,18 +172,72 @@ c2app.post('/beacon', (req, res) => {
   }
 
   const now = new Date().toISOString();
-  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').toString();
-  // Normalize IPv4-mapped IPv6 addresses like ::ffff:192.168.0.1
-  const ipNorm = ip.split(',')[0].trim().replace(/^.*:/, '');
+  // Prefer agent-provided publicIp when present (agent calls /whoami), else use x-forwarded-for / socket
+  const providedPublic = (req.body && req.body.publicIp) ? String(req.body.publicIp).trim() : null;
+  const ipHeader = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').toString();
+  // Determine the IP we will use (agent-provided public IP preferred)
+  const ipRaw = (providedPublic || ipHeader);
+  // Normalize IPv4-mapped IPv6 addresses like ::ffff:192.168.0.1 and handle comma lists
+  const ipNorm = String(ipRaw).split(',')[0].trim().replace(/^.*:/, '');
   const geo = geoip.lookup(ipNorm);
 
-  let agent = agents.get(agentID) || { id: agentID, cn, ip, firstSeen: now };
+  // Verbose debug logging to help diagnose geo failures
+  console.log('BEACON GEO DEBUG → agentID:', agentID);
+  console.log('BEACON GEO DEBUG → raw ip header:', ipHeader);
+  console.log('BEACON GEO DEBUG → provided/raw ip:', ipRaw);
+  console.log('BEACON GEO DEBUG → normalized ip:', ipNorm);
+  console.log('BEACON GEO DEBUG → geoip.lookup result:', geo);
+
+  // Helper: detect private RFC1918 addresses
+  const isPrivateIP = (addr) => {
+    if (!addr || addr === 'unknown') return false;
+    try {
+      const parts = addr.split('.').map(Number);
+      if (parts.length !== 4 || parts.some(isNaN)) return false;
+      if (parts[0] === 10) return true;
+      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+      if (parts[0] === 192 && parts[1] === 168) return true;
+      return false;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Deterministic fallback: hash agent id to a world coordinate (so markers are stable)
+  const hashToLatLng = (s) => {
+    let h = 2166136261 >>> 0; // FNV-1a 32-bit
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
+      h >>>= 0;
+    }
+    // map to lat -60..80 and lon -180..180
+    const lat = -60 + (h % 140) ;
+    const lon = -180 + ((h >>> 8) % 360);
+    return [lat, lon];
+  };
+
+  let agent = agents.get(agentID) || { id: agentID, cn, ip: ipNorm, firstSeen: now };
   agent.cn = cn;
-  agent.ip = ip;
+  agent.ip = ipNorm;
   if (geo && Array.isArray(geo.ll)) {
     agent.lat = geo.ll[0];
     agent.lng = geo.ll[1];
     agent.geo = { country: geo.country, region: geo.region, city: geo.city };
+  }
+  else {
+    // If geo lookup failed, log details and provide deterministic fallback for UI
+    console.warn('Geo lookup failed for IP:', ipNorm, 'isPrivate:', isPrivateIP(ipNorm));
+    const [flat, flng] = hashToLatLng(agentID);
+    agent.lat = flat;
+    agent.lng = flng;
+    agent.geo = { country: null, region: null, city: null, note: isPrivateIP(ipNorm) ? 'private-ip' : 'geo-missing' };
+  }
+  // Log the agent object that will be stored (useful to inspect lat/lng types)
+  try {
+    console.log('BEACON GEO DEBUG → final agent object before store:', JSON.stringify({ id: agentID, cn, ip: ipNorm, lat: agent.lat, lng: agent.lng, geo: agent.geo }));
+  } catch (e) {
+    console.log('BEACON GEO DEBUG → final agent object (stringify failed)');
   }
   agent.lastSeen = now;
   agent.beaconCount = (agent.beaconCount || 0) + 1;
@@ -209,6 +263,26 @@ c2app.post('/beacon', (req, res) => {
 // Dashboard endpoint
 app.get('/api/agents', (req, res) => {
   res.json(Array.from(agents.values()));
+});
+
+// Secure whoami endpoint for agents to discover their public IP
+// Protected by a bearer token (set AGENT_WHOAMI_TOKEN). The request
+// should be made over HTTPS to Traefik so the X-Forwarded-For header
+// contains the client's public IP.
+app.get('/whoami', (req, res) => {
+  const token = process.env.AGENT_WHOAMI_TOKEN || 'changeme-token';
+  const auth = (req.headers.authorization || '').trim();
+  if (!auth || !auth.toLowerCase().startsWith('bearer ')) {
+    return res.status(401).json({ error: 'missing auth' });
+  }
+  const got = auth.slice(7).trim();
+  if (got !== token) return res.status(403).json({ error: 'forbidden' });
+
+  // Trust Traefik's X-Forwarded-For if present, otherwise fall back to socket
+  const xf = req.headers['x-forwarded-for'];
+  const ips = xf ? String(xf).split(',').map(s => s.trim()).filter(Boolean) : [];
+  const sourceIp = ips.length ? ips[0] : (req.socket && req.socket.remoteAddress) || null;
+  return res.json({ ip: sourceIp });
 });
 
 

