@@ -16,25 +16,78 @@ import (
 )
 
 func main() {
-	// 1. Load embedded client cert + key
-	cert, err := tls.LoadX509KeyPair("../certs/agent.crt", "../certs/agent.key")
-	if err != nil {
-		log.Fatal("Failed to load agent cert/key:", err)
+	// Cert paths (configurable)
+	// Resolve cert/key pair. Prefer env vars; otherwise try common repo filenames so a
+	// fresh clone + `generate_session_certs.sh` will be found without extra configuration.
+	certEnv := os.Getenv("AGENT_CERT_PATH")
+	keyEnv := os.Getenv("AGENT_KEY_PATH")
+
+	tryPairs := [][]string{}
+	if certEnv != "" && keyEnv != "" {
+		tryPairs = append(tryPairs, []string{certEnv, keyEnv})
+	}
+	// repo-local candidates (relative to agents-go)
+	tryPairs = append(tryPairs, [][]string{
+		{"../certs/agent-client.crt", "../certs/agent-client.key"},
+		{"../certs/agent.crt", "../certs/agent.key"},
+		{"../certs/server.crt", "../certs/server.key"},
+	}...)
+
+	var cert tls.Certificate
+	var loadedCertPath, loadedKeyPath string
+	var loadErr error
+	attempted := []string{}
+	for _, p := range tryPairs {
+		attempted = append(attempted, p[0]+"|"+p[1])
+		if _, err := os.Stat(p[0]); err != nil {
+			continue
+		}
+		if _, err := os.Stat(p[1]); err != nil {
+			continue
+		}
+		cert, loadErr = tls.LoadX509KeyPair(p[0], p[1])
+		if loadErr == nil {
+			loadedCertPath = p[0]
+			loadedKeyPath = p[1]
+			break
+		}
+	}
+	if loadErr != nil {
+		log.Fatalf("Failed to load any agent cert/key pair. Attempts: %v. Last error: %v", attempted, loadErr)
+	}
+	log.Printf("Loaded agent cert/key: %s , %s", loadedCertPath, loadedKeyPath)
+
+	// 2. Load CA so we trust the server (fatal if missing)
+	caPath := os.Getenv("AGENT_CA_PATH")
+	if caPath == "" {
+		caPath = "../certs/ca.crt"
 	}
 
-	// 2. Load CA so we trust the server
-	caCert, err := os.ReadFile("../certs/ca.crt")
+	caCert, err := os.ReadFile(caPath)
 	if err != nil {
 		log.Fatal("Failed to read CA cert:", err)
 	}
 	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
+	if !caCertPool.AppendCertsFromPEM(caCert) {
+		log.Fatal("Failed to append CA cert to pool")
+	}
 
-	// 3. mTLS config
+	// Server names
+	serverName := os.Getenv("AGENT_SERVER_NAME")
+	if serverName == "" {
+		serverName = "c2.gla1v3.local"
+	}
+	apiServerName := os.Getenv("AGENT_API_SERVER_NAME")
+	if apiServerName == "" {
+		apiServerName = "api.gla1v3.local"
+	}
+
+	// 3. mTLS config (required by default)
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      caCertPool,
-		ServerName:   "c2.gla1v3.local",
+		ServerName:   serverName,
+		MinVersion:   tls.VersionTLS12,
 	}
 
 	client := &http.Client{
@@ -43,9 +96,12 @@ func main() {
 	}
 
 	// Separate TLS config for API (whoami) requests: trust same CA but use API servername
+	// API TLS: also present client cert for mTLS to API
 	apiTLS := &tls.Config{
-		RootCAs:    caCertPool,
-		ServerName: "api.gla1v3.local",
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      caCertPool,
+		ServerName:   apiServerName,
+		MinVersion:   tls.VersionTLS12,
 	}
 
 	whoamiClient := &http.Client{
@@ -127,7 +183,9 @@ func main() {
 					log.Printf("whoami non-200: %s", resp.Status)
 					return
 				}
-				var j struct{ IP string `json:"ip"` }
+				var j struct {
+					IP string `json:"ip"`
+				}
 				if err := json.NewDecoder(resp.Body).Decode(&j); err != nil {
 					log.Printf("whoami decode failed: %v", err)
 					return

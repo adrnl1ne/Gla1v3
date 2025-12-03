@@ -50,5 +50,53 @@ EOF
 openssl x509 -req -in "$CLIENT_CSR" -CA "$CA_CERT" -CAkey "$CA_KEY" -CAcreateserial -out "$CLIENT_CERT" -days 365 -sha256 -extfile manager-client.ext
 rm -f "$CLIENT_CSR" manager-client.ext
 
+# Traefik / C2 server cert
+TRAEFIK_KEY=traefik.key
+TRAEFIK_CSR=traefik.csr
+TRAEFIK_CERT=traefik.crt
+
+echo "Generating Traefik / C2 cert (c2.gla1v3.local)..."
+openssl genrsa -out "$TRAEFIK_KEY" 2048
+openssl req -new -key "$TRAEFIK_KEY" -out "$TRAEFIK_CSR" -subj "/CN=c2.gla1v3.local"
+cat > traefik.ext <<EOF
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:c2.gla1v3.local,DNS:traefik,DNS:dashboard.gla1v3.local,DNS:api.gla1v3.local,IP:127.0.0.1,DNS:localhost
+EOF
+openssl x509 -req -in "$TRAEFIK_CSR" -CA "$CA_CERT" -CAkey "$CA_KEY" -CAcreateserial -out "$TRAEFIK_CERT" -days 365 -sha256 -extfile traefik.ext
+rm -f "$TRAEFIK_CSR" traefik.ext
+
+# Create filenames services expect in repo (keeps everything self-contained)
+cp -f "$TRAEFIK_CERT" c2.gla1v3.local.crt
+cp -f "$TRAEFIK_KEY" c2.gla1v3.local.key
+cp -f "$TRAEFIK_CERT" server.crt
+cp -f "$TRAEFIK_KEY" server.key
+
+# Agent client cert (for Go agent / other clients)
+AGENT_KEY=agent-client.key
+AGENT_CSR=agent-client.csr
+AGENT_CERT=agent-client.crt
+
+echo "Generating agent client cert (agent-client)..."
+openssl genrsa -out "$AGENT_KEY" 2048
+openssl req -new -key "$AGENT_KEY" -out "$AGENT_CSR" -subj "/CN=agent-client"
+cat > agent-client.ext <<EOF
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth
+EOF
+openssl x509 -req -in "$AGENT_CSR" -CA "$CA_CERT" -CAkey "$CA_KEY" -CAcreateserial -out "$AGENT_CERT" -days 365 -sha256 -extfile agent-client.ext
+rm -f "$AGENT_CSR" agent-client.ext
+
 echo "Generated certs in: $OUT_DIR"
 ls -la "$OUT_DIR" || true
+
+# Secure private keys
+echo "Setting key permissions to 644 for private keys so non-root containers can read them (dev)."
+echo "Note: For production, use docker secrets or a secrets manager and restrict permissions to 600."
+# Make keys readable so containers running as non-root can access them when mounted from the repo.
+chmod 644 "$OUT_DIR"/*.key || true
+

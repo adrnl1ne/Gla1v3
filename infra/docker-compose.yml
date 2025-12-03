@@ -85,6 +85,7 @@ services:
       - wazuh-etc:/var/ossec
       - wazuh-data:/var/ossec/data
       - ../certs:/etc/ssl/certs:ro
+      - filebeat_config:/etc/filebeat
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.wazuh.rule=Host(`wazuh.${GLA1V3_DOMAIN}`)"
@@ -103,7 +104,7 @@ services:
       - certs-init
     environment:
       - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
-      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_SECURITY_PLUGIN=false
     volumes:
       - wazuh-indexer-data:/var/lib/opensearch
       - ../certs:/etc/ssl/certs:ro
@@ -124,6 +125,72 @@ services:
     command: sh -c "apt-get update >/dev/null && apt-get install -y --no-install-recommends openssl bash >/dev/null && /bin/bash /scripts/generate_session_certs.sh"
     labels:
       - "traefik.enable=false"
+    networks:
+      - gla1v3-net
+
+  # One-shot initializer that copies host filebeat files into a named
+  # volume so the manager can use container-owned files (no host ACLs).
+  filebeat-init:
+    image: alpine:3.18
+    container_name: filebeat-init
+    restart: 'no'
+    volumes:
+      - filebeat_config:/dest
+      - ./filebeat:/src:ro
+    command: sh -c "mkdir -p /dest && cp /src/filebeat.yml /dest/filebeat.yml && cp /src/wazuh-template.json /dest/wazuh-template.json || true"
+    networks:
+      - gla1v3-net
+
+  # External Filebeat service to avoid embedded Filebeat runtime issues
+  filebeat:
+    build:
+      context: ./filebeat
+      dockerfile: Dockerfile
+    container_name: filebeat
+    restart: unless-stopped
+    depends_on:
+      - wazuh-indexer
+      - filebeat-init
+    user: root
+    volumes:
+      - filebeat_config:/etc/filebeat:ro
+      - wazuh-etc:/var/ossec:ro
+      - ../certs:/etc/ssl/certs:ro
+      - filebeat-logs:/var/log/filebeat
+    command: ["-e", "-c", "/etc/filebeat/filebeat.yml"]
+    networks:
+      - gla1v3-net
+
+  # A tiny proxy that masks OpenSearch's lack of a /_license endpoint.
+  # It returns a benign 200 for /_license and forwards other requests
+  # to the real indexer using mTLS with the repo certs. Filebeat will
+  # be configured to talk to this proxy instead of demo.indexer.
+  license-proxy:
+    build:
+      context: ./filebeat/proxy
+      dockerfile: Dockerfile
+    container_name: license-proxy
+    restart: unless-stopped
+    environment:
+      - UPSTREAM_INDEXER=https://demo.indexer:9200
+    volumes:
+      - ../certs:/etc/ssl/certs:ro
+    networks:
+      - gla1v3-net
+
+  # Temporary test service to run the Go agent inside the infra network
+  # This executes the agent using the repo checkout and mounted certs so
+  # mTLS can be exercised end-to-end without altering host trust stores.
+  agent-test:
+    image: golang:1.23
+    container_name: agent-test
+    restart: 'no'
+    working_dir: /src/agents-go
+    volumes:
+      - ..:/src:ro
+    environment:
+      # Point the agent to the traefik service inside the compose network
+      - C2_URL=https://traefik:4443/beacon
     networks:
       - gla1v3-net
 
@@ -187,6 +254,10 @@ volumes:
   wazuh-etc:
   wazuh-data:
   wazuh-indexer-data:
+  filebeat_config:
+    driver: local
+  filebeat-logs:
+    driver: local
   traefik-certs:
     driver: local
     driver_opts:

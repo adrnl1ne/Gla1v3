@@ -55,11 +55,19 @@ const extractCN = (pem) => {
 };
 
 
-// Manual CORS middleware — FINAL WORKING VERSION
+// Manual CORS middleware — accept dashboard host variants used in dev
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "https://dashboard.gla1v3.local");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, X-Agent-ID");
-  res.header("Access-Control-Allow-Credentials", "true");
+  const domain = process.env.GLA1V3_DOMAIN || 'gla1v3.local';
+  const allowed = [`https://dashboard.${domain}`, `https://${domain}`];
+  const origin = req.headers.origin;
+  if (origin && allowed.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else {
+    // Fallback to the dashboard host to keep dev UX working when Origin is absent
+    res.header('Access-Control-Allow-Origin', allowed[0]);
+  }
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, X-Agent-ID');
+  res.header('Access-Control-Allow-Credentials', 'true');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
