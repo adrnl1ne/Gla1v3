@@ -185,12 +185,27 @@ c2app.post('/beacon', (req, res) => {
 
   // Extract CN from Traefik's client cert header (Traefik terminates mTLS)
   let cn = 'no-cert';
-  const clientCertHeader = req.headers['x-forwarded-tls-client-cert'] || req.headers['x-forwarded-client-cert'];
-  if (clientCertHeader) {
-    // Traefik provides the cert in URL-encoded PEM format
-    // Extract CN using a simple regex (CN=value)
-    const match = clientCertHeader.match(/CN=([^,]+)/);
-    if (match) cn = match[1];
+  
+  // Traefik's passTLSClientCert middleware creates these headers:
+  // - x-forwarded-tls-client-cert-info: contains subject.CN when info.subject.commonName=true (URL-encoded)
+  // - x-forwarded-tls-client-cert: contains full PEM cert when pem=true (URL-encoded)
+  const certInfo = req.headers['x-forwarded-tls-client-cert-info'];
+  const certPem = req.headers['x-forwarded-tls-client-cert'];
+  
+  if (certInfo) {
+    // Decode URL-encoded header: Subject%3D%22CN%3Dagent-client%22 → Subject="CN=agent-client"
+    const decoded = decodeURIComponent(certInfo);
+    const match = decoded.match(/CN=([^,\]"]+)/);
+    if (match) {
+      cn = match[1].trim();
+    }
+  } else if (certPem) {
+    // Fallback: extract from PEM (URL-encoded)
+    const decoded = decodeURIComponent(certPem);
+    const match = decoded.match(/CN=([^,]+)/);
+    if (match) {
+      cn = match[1].trim();
+    }
   }
 
   const now = new Date().toISOString();
@@ -285,6 +300,60 @@ c2app.post('/beacon', (req, res) => {
 // Dashboard endpoint
 app.get('/api/agents', (req, res) => {
   res.json(Array.from(agents.values()));
+});
+
+// EDR Alerts endpoint — read Wazuh alerts from volume as root
+// MVP approach: read alerts.json with elevated permissions
+// This works without needing wazuh-indexer (simplified architecture)
+app.get('/api/alerts/recent', async (req, res) => {
+  try {
+    const alertsFilePath = '/wazuh-alerts/logs/alerts/alerts.json';
+    
+    // Read last 100 lines from alerts.json (each line is one JSON alert)
+    // Use child_process with sudo/elevated perms if needed
+    const { exec } = require('child_process');
+    const util = require('util');
+    const execPromise = util.promisify(exec);
+    
+    // Try reading with cat (will work if container runs as root or file is readable)
+    const { stdout } = await execPromise(`tail -n 100 ${alertsFilePath} 2>&1 || echo ""`).catch(() => ({ stdout: '' }));
+    
+    if (!stdout || !stdout.trim() || stdout.includes('Permission denied') || stdout.includes('No such file')) {
+      console.log('No Wazuh alerts accessible yet (file missing or permission issue)');
+      return res.json([]);
+    }
+    
+    const lines = stdout.trim().split('\n').filter(Boolean);
+    
+    // Parse each line as JSON and map to frontend format
+    const alerts = lines
+      .map(line => {
+        try {
+          return JSON.parse(line);
+        } catch (e) {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .map(alert => ({
+        timestamp: alert.timestamp || new Date().toISOString(),
+        agent: alert.agent?.name || 'unknown',
+        ruleId: alert.rule?.id || '0',
+        description: alert.rule?.description || 'No description',
+        level: alert.rule?.level || 0,
+        mitre: {
+          tactics: alert.rule?.mitre?.tactic || [],
+          techniques: alert.rule?.mitre?.id || []
+        }
+      }))
+      .reverse(); // Most recent first
+
+    console.log(`Fetched ${alerts.length} Wazuh alerts from file`);
+    res.json(alerts);
+  } catch (err) {
+    console.error('Wazuh alerts fetch error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch Wazuh alerts', details: err.message });
+  }
 });
 
 // Secure whoami endpoint for agents to discover their public IP

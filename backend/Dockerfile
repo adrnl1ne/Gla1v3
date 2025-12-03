@@ -17,9 +17,8 @@ COPY . .
 # Expose backend API and C2 ports
 EXPOSE 3000 3001
 
-# Run as non-root for security
-RUN addgroup -g 1001 -S gla1v3 && adduser -u 1001 -S gla1v3 -G gla1v3
-USER gla1v3
+# MVP: Run as root to access Wazuh alerts volume
+# TODO: In production, use proper volume permissions or API access
 
 # Start the backend server
 CMD ["node", "index.js"]

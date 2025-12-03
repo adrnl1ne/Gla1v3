@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import WorldMap from './WorldMap';
+import AlertTable from './AlertTable';
 
 export default function Dashboard() {
   const [agents, setAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState(null);
+  const [activeTab, setActiveTab] = useState('agents'); // 'agents' or 'alerts'
 
   useEffect(() => {
     const fetchAgents = async () => {
@@ -34,15 +36,54 @@ export default function Dashboard() {
     <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', background: '#0d1117', color: '#c9d1d9', margin: 0, padding: 0, overflow: 'hidden', position: 'fixed', top: 0, left: 0, boxSizing: 'border-box' }}>
       {/* Header */}
       <header style={{ padding: '1.5rem 2rem', background: '#161b22', borderBottom: '1px solid #30363d' }}>
-        <h1 style={{ margin: 0, color: '#58a6ff', fontSize: '2.2rem' }}>
-          GLA1V3 — LIVE AGENTS ({agents.length})
-        </h1>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 style={{ margin: 0, color: '#58a6ff', fontSize: '2.2rem' }}>
+            GLA1V3 — LIVE AGENTS ({agents.length})
+          </h1>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button 
+              onClick={() => setActiveTab('agents')}
+              style={{ 
+                background: activeTab === 'agents' ? '#1f6feb' : 'transparent', 
+                border: '1px solid #30363d', 
+                color: activeTab === 'agents' ? '#fff' : '#58a6ff', 
+                padding: '8px 16px', 
+                borderRadius: 6, 
+                cursor: 'pointer',
+                fontWeight: '600',
+                transition: 'all 0.2s'
+              }}>
+              Agents
+            </button>
+            <button 
+              onClick={() => setActiveTab('alerts')}
+              style={{ 
+                background: activeTab === 'alerts' ? '#1f6feb' : 'transparent', 
+                border: '1px solid #30363d', 
+                color: activeTab === 'alerts' ? '#fff' : '#58a6ff', 
+                padding: '8px 16px', 
+                borderRadius: 6, 
+                cursor: 'pointer',
+                fontWeight: '600',
+                transition: 'all 0.2s'
+              }}>
+              EDR Alerts
+            </button>
+          </div>
+        </div>
       </header>
 
       <div style={{ flex: 1, display: 'flex', gap: '1rem', padding: '1rem' }}>
-        {/* Agent Table — primary view */}
+        {/* Content area — switches between agents and alerts */}
         <div style={{ flex: 1, background: '#161b22', borderRadius: '12px', padding: '1.5rem', overflow: 'auto', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
-          <h2 style={{ marginTop: 0, color: '#58a6ff' }}>Agent Status</h2>
+          <h2 style={{ marginTop: 0, color: '#58a6ff' }}>
+            {activeTab === 'agents' ? 'Agent Status' : 'EDR Alerts — Live Detections'}
+          </h2>
+          
+          {activeTab === 'alerts' && <AlertTable />}
+          
+          {activeTab === 'agents' && (
+            <div>
           <div style={{ marginBottom: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <button onClick={() => setShowRaw(s => !s)} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 8px', borderRadius: 6, cursor: 'pointer' }}>{showRaw ? 'Hide' : 'Show'} Raw Agents</button>
             <button onClick={() => { setSelectedAgent(null); setShowMapModal(true); }} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 8px', borderRadius: 6, cursor: 'pointer' }}>Open Map</button>
@@ -93,6 +134,8 @@ export default function Dashboard() {
               })}
             </tbody>
           </table>
+            </div>
+          )}
         </div>
 
         {/* Logistics panel removed per UX request */}

@@ -74,6 +74,7 @@ services:
       - WAZUH_PASS=wazuh-wui
     volumes:
       - ../certs:/app/certs:ro
+      - wazuh-data:/wazuh-alerts:ro
     depends_on:
       - postgres
       - redis
