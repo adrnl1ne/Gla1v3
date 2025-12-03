@@ -61,37 +61,67 @@ services:
     networks:
       - gla1v3-net
 
+  # NOTE: Temporary cert-init one-shot removed. Previously this copied
+  # host-generated certs into the manager volume. That behaviour caused
+  # confusion and leftover files; cert provisioning should be handled
+  # by a dedicated session cert generator (TODO).
+
   wazuh-manager:
     image: wazuh/wazuh-manager:4.8.2
     container_name: wazuh-manager
     restart: unless-stopped
+    depends_on:
+      - certs-init
+      - wazuh-indexer
     environment:
-      - INDEXER_URL=https://wazuh-indexer:9200
+      - INDEXER_URL=https://demo.indexer:9200
       - INDEXER_USERNAME=admin
       - INDEXER_PASSWORD=admin_password
       - FILEBEAT_SSL_VERIFICATION=false
       - WAZUH_API_HTTPS=true
-    depends_on:
-      - wazuh-indexer
+      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/certs/ca.crt
+      - FILEBEAT_SSL_VERIFICATION_MODE=full
     volumes:
-      - wazuh-etc:/var/ossec/etc
+      - wazuh-etc:/var/ossec
       - wazuh-data:/var/ossec/data
+      - ../certs:/etc/ssl/certs:ro
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.wazuh.rule=Host(`wazuh.${GLA1V3_DOMAIN}`)"
-      - "traefik.http.routers.wazuh.tls=true"  # Uses default store
-      - "traefik.http.services.wazuh.loadbalancer.server.port=5601"
+      - "traefik.http.routers.wazuh.tls=true"
+      - "traefik.http.services.wazuh.loadbalancer.server.port=55000"
     networks:
-      - gla1v3-net
+      gla1v3-net:
+        aliases:
+          - wazuh.com
 
   wazuh-indexer:
     image: wazuh/wazuh-indexer:4.8.2
     container_name: wazuh-indexer
     restart: unless-stopped
+    depends_on:
+      - certs-init
     environment:
       - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      - DISABLE_SECURITY_PLUGIN=true
     volumes:
       - wazuh-indexer-data:/var/lib/opensearch
+      - ../certs:/etc/ssl/certs:ro
+    labels:
+      - "traefik.enable=false"
+    networks:
+      gla1v3-net:
+        aliases:
+          - demo.indexer
+
+  certs-init:
+    image: ubuntu:22.04
+    container_name: infra-certs-init
+    restart: 'no'
+    volumes:
+      - ../certs:/certs
+      - ./generate_session_certs.sh:/scripts/generate_session_certs.sh:ro
+    command: sh -c "apt-get update >/dev/null && apt-get install -y --no-install-recommends openssl bash >/dev/null && /bin/bash /scripts/generate_session_certs.sh"
     labels:
       - "traefik.enable=false"
     networks:
@@ -107,7 +137,8 @@ services:
       - GLA1V3_DOMAIN=gla1v3.local  # ← ADDED: Full value for labels
       # Secure token for agent whoami endpoint. Change as needed; kept here for POC.
       - AGENT_WHOAMI_TOKEN=3f7b9a2d8c1e4f6a9b0c2d3e4f5a6b7c
-      - WAZUH_URL=https://wazuh-manager:55000
+      - WAZUH_URL=https://wazuh.com:55000
+      - WAZUH_EXPECTED_HOSTNAME=wazuh.com
       - WAZUH_USER=wazuh
       - WAZUH_PASS=changeme
     volumes:

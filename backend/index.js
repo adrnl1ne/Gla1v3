@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const https = require('https');
+const tls = require('tls');
 const path = require('path');
 const app = express();
 // Separate app for C2 mTLS (HTTPS)
@@ -96,50 +97,81 @@ async function fetchWazuhAlert(agentId, output) {
     const pass = process.env.WAZUH_PASS || 'password';
     // Simple search: limit to recent alerts for the agent
     const q = encodeURIComponent(`agent.name:${agentId}`);
-    const url = `${base}/alerts?q=${q}&limit=1&sort=-@timestamp`;
+    const urlStr = `${base.replace(/\/$/, '')}/alerts?q=${q}&limit=1&sort=-@timestamp`;
     const auth = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
 
-    console.log(`Wazuh fetch: ${url} (agent=${agentId})`);
+    console.log(`Wazuh fetch: ${urlStr} (agent=${agentId})`);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    let res;
-    try {
-      // Create an https.Agent that trusts the local CA (mounted into the container)
-      // This lets Node validate the Wazuh manager certificate signed by your internal CA.
-      const caPath = path.join(__dirname, 'certs', 'ca.crt');
-      let httpsAgent = undefined;
+    // Load CA from mounted certs (if present) and create an https.Agent that enforces TLS.
+    // Prefer the compose-mounted path `/app/certs/ca.crt` but fall back to `./certs/ca.crt`.
+    const caPaths = [ '/app/certs/ca.crt', path.join(__dirname, 'certs', 'ca.crt') ];
+    let ca = null;
+    for (const p of caPaths) {
       try {
-        const ca = fs.readFileSync(caPath);
-        httpsAgent = new https.Agent({ ca, keepAlive: true });
+        console.log('Wazuh fetch: checking CA candidate', p);
+        ca = fs.readFileSync(p);
+        console.log('Wazuh fetch: using CA file at', p);
+        break;
       } catch (e) {
-        // If the CA isn't available, continue without a custom agent (will use system CA)
-        console.warn('Wazuh fetch: CA file not found or unreadable at', caPath, '-', e && e.message);
+        console.log('Wazuh fetch: cannot read CA at', p, '-', e && e.message);
       }
-
-      const fetchOpts = { headers: { Authorization: auth, Accept: 'application/json' }, signal: controller.signal };
-      if (httpsAgent) fetchOpts.agent = { 'https:': httpsAgent };
-
-      res = await fetch(url, fetchOpts);
-    } catch (err) {
-      clearTimeout(timeout);
-      console.error('Wazuh fetch failed to reach URL:', url, err && (err.stack || err.message || err));
-      throw err;
     }
-    clearTimeout(timeout);
+    if (!ca) console.warn('Wazuh fetch: CA file not found in expected locations:', caPaths.join(', '));
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '<no-body>');
-      console.error('Wazuh fetch non-OK:', res.status, res.statusText, text);
-      return null;
-    }
+    // Allow an override for the certificate hostname we expect the Wazuh server to present.
+    const expectedName = process.env.WAZUH_EXPECTED_HOSTNAME || 'wazuh.com';
 
-    const json = await res.json().catch(async (e) => {
-      const text = await res.text().catch(() => '<no-body>');
-      console.error('Wazuh response JSON parse error:', e && (e.stack || e.message || e), 'body:', text);
+    const httpsAgent = new https.Agent({ ca: ca || undefined, keepAlive: true, rejectUnauthorized: true });
+
+    // Use Node's https.request for explicit control over TLS and to get clearer errors
+    const u = new URL(urlStr);
+    const options = {
+      hostname: u.hostname,
+      port: u.port || 443,
+      path: u.pathname + u.search,
+      method: 'GET',
+      headers: { Authorization: auth, Accept: 'application/json' },
+      agent: httpsAgent,
+      timeout: 8000,
+      // Force SNI and server identity check against the expected certificate name (CN/SAN)
+      servername: expectedName,
+      checkServerIdentity: (servername, cert) => {
+        // Validate using the expectedName (this preserves CA verification while allowing hostname mapping)
+        return tls.checkServerIdentity(expectedName, cert);
+      }
+    };
+
+    const body = await new Promise((resolve, reject) => {
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (c) => (data += c));
+        res.on('end', () => {
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            return reject(new Error(`Wazuh responded ${res.statusCode} ${res.statusMessage} - ${data.slice(0, 200)}`));
+          }
+          resolve(data);
+        });
+      });
+      req.on('timeout', () => {
+        req.destroy(new Error('Wazuh request timed out'));
+      });
+      req.on('error', (err) => reject(err));
+      req.end();
+    }).catch((e) => {
+      // Surface useful TLS error details
+      console.error('Wazuh fetch failed:', e && (e.code || e.message || e));
       return null;
     });
-    if (!json) return null;
+
+    if (!body) return null;
+
+    let json = null;
+    try {
+      json = JSON.parse(body);
+    } catch (e) {
+      console.error('Wazuh response JSON parse error:', e && e.message, 'body:', body.slice(0, 1000));
+      return null;
+    }
 
     const items = json?.data?.affected_items || [];
     if (!items.length) return null;
@@ -150,7 +182,7 @@ async function fetchWazuhAlert(agentId, output) {
       timestamp: it['@timestamp'] || ''
     };
   } catch (e) {
-    console.error('Wazuh fetch error:', e && (e.stack || e.message || e));
+    console.error('Wazuh fetch error (unexpected):', e && (e.stack || e.message || e));
     return null;
   }
 }
