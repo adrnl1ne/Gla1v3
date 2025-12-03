@@ -1,35 +1,18 @@
-x-common-vars: &common-vars
-  GLA1V3_DOMAIN: gla1v3.local
-
 services:
   traefik:
-    image: traefik:v2.10  # ← KEPT: Your preferred stable version
+    image: traefik:v2.10
     container_name: traefik
     restart: unless-stopped
     ports:
       - "443:443"
-      - "4443:4443"  # ← KEPT: Exposed for agent beacons
+      - "4443:4443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik-data:/data
-      - traefik-logs:/logs
-      - traefik-certs:/etc/traefik/certs:ro  # ← KEPT: Binds your certs folder
-      - ./traefik.yml:/etc/traefik/traefik.yml:ro  # ← UNCOMMENTED: Static config
-      - ./dynamic.yml:/etc/traefik/dynamic.yml:ro  # ← UNCOMMENTED: Dynamic mTLS + certs
+      - ../certs:/etc/traefik/certs:ro
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic.yml:/etc/traefik/dynamic.yml:ro
     environment:
-      - GLA1V3_DOMAIN=gla1v3.local  # ← FIXED: Full value (was just "GLA1V3_DOMAIN")
-    command:
-      - --api.insecure=true
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --providers.file=true  # ← ADDED: Enable file provider for dynamic.yml
-      - --entrypoints.websecure.address=:443
-      - --entrypoints.c2.address=:4443  # mTLS for agents
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.traefik.rule=Host(`traefik.${GLA1V3_DOMAIN}`)"
-      - "traefik.http.routers.traefik.service=api@internal"
-      - "traefik.http.routers.traefik.tls=true"  # Uses default store from dynamic.yml
+      - GLA1V3_DOMAIN=gla1v3.local
     networks:
       - gla1v3-net
 
@@ -41,11 +24,8 @@ services:
       POSTGRES_DB: gla1v3
       POSTGRES_USER: gla1v3
       POSTGRES_PASSWORD: gla1v3password
-      GLA1V3_DOMAIN: gla1v3.local
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    labels:
-      - "traefik.enable=false"
     networks:
       - gla1v3-net
 
@@ -56,141 +36,27 @@ services:
     command: redis-server --save 60 1 --loglevel warning
     volumes:
       - redis-data:/data
-    labels:
-      - "traefik.enable=false"
     networks:
       - gla1v3-net
 
-  # NOTE: Temporary cert-init one-shot removed. Previously this copied
-  # host-generated certs into the manager volume. That behaviour caused
-  # confusion and leftover files; cert provisioning should be handled
-  # by a dedicated session cert generator (TODO).
-
-  wazuh-manager:
+  wazuh:
     image: wazuh/wazuh-manager:4.8.2
-    container_name: wazuh-manager
+    container_name: wazuh
     restart: unless-stopped
-    depends_on:
-      - certs-init
-      - wazuh-indexer
+    hostname: wazuh
+    ports:
+      - "1514:1514"
+      - "1515:1515"
     environment:
-      - INDEXER_URL=https://demo.indexer:9200
-      - INDEXER_USERNAME=admin
-      - INDEXER_PASSWORD=admin_password
-      - FILEBEAT_SSL_VERIFICATION=false
-      - WAZUH_API_HTTPS=true
-      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/certs/ca.crt
-      - FILEBEAT_SSL_VERIFICATION_MODE=full
+      - FILEBEAT_SSL_VERIFICATION_MODE=none
     volumes:
-      - wazuh-etc:/var/ossec
-      - wazuh-data:/var/ossec/data
-      - ../certs:/etc/ssl/certs:ro
-      - filebeat_config:/etc/filebeat
+      - wazuh-data:/var/ossec
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.wazuh.rule=Host(`wazuh.${GLA1V3_DOMAIN}`)"
+      - "traefik.http.routers.wazuh.rule=Host(`wazuh.gla1v3.local`)"
+      - "traefik.http.routers.wazuh.entrypoints=websecure"
       - "traefik.http.routers.wazuh.tls=true"
       - "traefik.http.services.wazuh.loadbalancer.server.port=55000"
-    networks:
-      gla1v3-net:
-        aliases:
-          - wazuh.com
-
-  wazuh-indexer:
-    image: wazuh/wazuh-indexer:4.8.2
-    container_name: wazuh-indexer
-    restart: unless-stopped
-    depends_on:
-      - certs-init
-    environment:
-      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
-      - DISABLE_SECURITY_PLUGIN=false
-    volumes:
-      - wazuh-indexer-data:/var/lib/opensearch
-      - ../certs:/etc/ssl/certs:ro
-    labels:
-      - "traefik.enable=false"
-    networks:
-      gla1v3-net:
-        aliases:
-          - demo.indexer
-
-  certs-init:
-    image: ubuntu:22.04
-    container_name: infra-certs-init
-    restart: 'no'
-    volumes:
-      - ../certs:/certs
-      - ./generate_session_certs.sh:/scripts/generate_session_certs.sh:ro
-    command: sh -c "apt-get update >/dev/null && apt-get install -y --no-install-recommends openssl bash >/dev/null && /bin/bash /scripts/generate_session_certs.sh"
-    labels:
-      - "traefik.enable=false"
-    networks:
-      - gla1v3-net
-
-  # One-shot initializer that copies host filebeat files into a named
-  # volume so the manager can use container-owned files (no host ACLs).
-  filebeat-init:
-    image: alpine:3.18
-    container_name: filebeat-init
-    restart: 'no'
-    volumes:
-      - filebeat_config:/dest
-      - ./filebeat:/src:ro
-    command: sh -c "mkdir -p /dest && cp /src/filebeat.yml /dest/filebeat.yml && cp /src/wazuh-template.json /dest/wazuh-template.json || true"
-    networks:
-      - gla1v3-net
-
-  # External Filebeat service to avoid embedded Filebeat runtime issues
-  filebeat:
-    build:
-      context: ./filebeat
-      dockerfile: Dockerfile
-    container_name: filebeat
-    restart: unless-stopped
-    depends_on:
-      - wazuh-indexer
-      - filebeat-init
-    user: root
-    volumes:
-      - filebeat_config:/etc/filebeat:ro
-      - wazuh-etc:/var/ossec:ro
-      - ../certs:/etc/ssl/certs:ro
-      - filebeat-logs:/var/log/filebeat
-    command: ["-e", "-c", "/etc/filebeat/filebeat.yml"]
-    networks:
-      - gla1v3-net
-
-  # A tiny proxy that masks OpenSearch's lack of a /_license endpoint.
-  # It returns a benign 200 for /_license and forwards other requests
-  # to the real indexer using mTLS with the repo certs. Filebeat will
-  # be configured to talk to this proxy instead of demo.indexer.
-  license-proxy:
-    build:
-      context: ./filebeat/proxy
-      dockerfile: Dockerfile
-    container_name: license-proxy
-    restart: unless-stopped
-    environment:
-      - UPSTREAM_INDEXER=https://demo.indexer:9200
-    volumes:
-      - ../certs:/etc/ssl/certs:ro
-    networks:
-      - gla1v3-net
-
-  # Temporary test service to run the Go agent inside the infra network
-  # This executes the agent using the repo checkout and mounted certs so
-  # mTLS can be exercised end-to-end without altering host trust stores.
-  agent-test:
-    image: golang:1.23
-    container_name: agent-test
-    restart: 'no'
-    working_dir: /src/agents-go
-    volumes:
-      - ..:/src:ro
-    environment:
-      # Point the agent to the traefik service inside the compose network
-      - C2_URL=https://traefik:4443/beacon
     networks:
       - gla1v3-net
 
@@ -199,34 +65,37 @@ services:
     container_name: backend
     restart: unless-stopped
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - DATABASE_URL=postgresql://gla1v3:gla1v3password@postgres:5432/gla1v3
-      - GLA1V3_DOMAIN=gla1v3.local  # ← ADDED: Full value for labels
-      # Secure token for agent whoami endpoint. Change as needed; kept here for POC.
+      - GLA1V3_DOMAIN=gla1v3.local
       - AGENT_WHOAMI_TOKEN=3f7b9a2d8c1e4f6a9b0c2d3e4f5a6b7c
-      - WAZUH_URL=https://wazuh.com:55000
-      - WAZUH_EXPECTED_HOSTNAME=wazuh.com
-      - WAZUH_USER=wazuh
-      - WAZUH_PASS=changeme
+      - WAZUH_URL=https://wazuh:55000
+      - WAZUH_USER=wazuh-wui
+      - WAZUH_PASS=wazuh-wui
     volumes:
       - ../certs:/app/certs:ro
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`api.${GLA1V3_DOMAIN}`)"
-      - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls=true"
-      - "traefik.http.routers.api.service=api"
-      - "traefik.http.services.api.loadbalancer.server.port=3000"
-
-      # Public health endpoint on :443 (no mTLS)
-      - "traefik.http.routers.health.rule=Host(`c2.${GLA1V3_DOMAIN}`) && Path(`/health`)"
-      - "traefik.http.routers.health.entrypoints=websecure"
-      - "traefik.http.routers.health.tls=true"
-      - "traefik.http.routers.health.service=api"
-
     depends_on:
       - postgres
       - redis
+      - wazuh
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend-api.rule=Host(`api.gla1v3.local`)"
+      - "traefik.http.routers.backend-api.entrypoints=websecure"
+      - "traefik.http.routers.backend-api.tls=true"
+      - "traefik.http.routers.backend-api.service=backend-api-svc"
+      - "traefik.http.services.backend-api-svc.loadbalancer.server.port=3000"
+      - "traefik.http.routers.c2-beacon.rule=Host(`c2.gla1v3.local`) && PathPrefix(`/beacon`)"
+      - "traefik.http.routers.c2-beacon.entrypoints=c2"
+      - "traefik.http.routers.c2-beacon.tls=true"
+      - "traefik.http.routers.c2-beacon.tls.options=mtls@file"
+      - "traefik.http.routers.c2-beacon.middlewares=pass-client-cert@file"
+      - "traefik.http.routers.c2-beacon.service=c2-svc"
+      - "traefik.http.services.c2-svc.loadbalancer.server.port=3001"
+      - "traefik.http.routers.c2-health.rule=Host(`c2.gla1v3.local`) && Path(`/health`)"
+      - "traefik.http.routers.c2-health.entrypoints=websecure"
+      - "traefik.http.routers.c2-health.tls=true"
+      - "traefik.http.routers.c2-health.service=backend-api-svc"
     networks:
       - gla1v3-net
 
@@ -236,7 +105,8 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.dashboard.rule=Host(`dashboard.${GLA1V3_DOMAIN}`) || Host(`${GLA1V3_DOMAIN}`)"
+      - "traefik.http.routers.dashboard.rule=Host(`dashboard.gla1v3.local`) || Host(`gla1v3.local`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
       - "traefik.http.routers.dashboard.tls=true"
       - "traefik.http.services.dashboard.loadbalancer.server.port=5173"
     networks:
@@ -247,20 +117,6 @@ networks:
     driver: bridge
 
 volumes:
-  traefik-data:
-  traefik-logs:
   postgres-data:
   redis-data:
-  wazuh-etc:
   wazuh-data:
-  wazuh-indexer-data:
-  filebeat_config:
-    driver: local
-  filebeat-logs:
-    driver: local
-  traefik-certs:
-    driver: local
-    driver_opts:
-      type: none
-      device: ${PWD}/../certs
-      o: bind

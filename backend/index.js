@@ -110,43 +110,22 @@ async function fetchWazuhAlert(agentId, output) {
 
     console.log(`Wazuh fetch: ${urlStr} (agent=${agentId})`);
 
-    // Load CA from mounted certs (if present) and create an https.Agent that enforces TLS.
-    // Prefer the compose-mounted path `/app/certs/ca.crt` but fall back to `./certs/ca.crt`.
-    const caPaths = [ '/app/certs/ca.crt', path.join(__dirname, 'certs', 'ca.crt') ];
-    let ca = null;
-    for (const p of caPaths) {
-      try {
-        console.log('Wazuh fetch: checking CA candidate', p);
-        ca = fs.readFileSync(p);
-        console.log('Wazuh fetch: using CA file at', p);
-        break;
-      } catch (e) {
-        console.log('Wazuh fetch: cannot read CA at', p, '-', e && e.message);
-      }
-    }
-    if (!ca) console.warn('Wazuh fetch: CA file not found in expected locations:', caPaths.join(', '));
+    // For MVP, disable TLS verification for Wazuh API (simplifies setup)
+    // In production, use proper certificates
+    const httpsAgent = new https.Agent({ 
+      rejectUnauthorized: false,
+      keepAlive: true 
+    });
 
-    // Allow an override for the certificate hostname we expect the Wazuh server to present.
-    const expectedName = process.env.WAZUH_EXPECTED_HOSTNAME || 'wazuh.com';
-
-    const httpsAgent = new https.Agent({ ca: ca || undefined, keepAlive: true, rejectUnauthorized: true });
-
-    // Use Node's https.request for explicit control over TLS and to get clearer errors
     const u = new URL(urlStr);
     const options = {
       hostname: u.hostname,
-      port: u.port || 443,
+      port: u.port || 55000,
       path: u.pathname + u.search,
       method: 'GET',
       headers: { Authorization: auth, Accept: 'application/json' },
       agent: httpsAgent,
-      timeout: 8000,
-      // Force SNI and server identity check against the expected certificate name (CN/SAN)
-      servername: expectedName,
-      checkServerIdentity: (servername, cert) => {
-        // Validate using the expectedName (this preserves CA verification while allowing hostname mapping)
-        return tls.checkServerIdentity(expectedName, cert);
-      }
+      timeout: 8000
     };
 
     const body = await new Promise((resolve, reject) => {
@@ -204,11 +183,14 @@ c2app.post('/beacon', (req, res) => {
   const output = sanitize(body.output || '', 2048);
   const errStr = sanitize(body.error || '', 1024);
 
-  // Extract CN from mutual TLS if available
+  // Extract CN from Traefik's client cert header (Traefik terminates mTLS)
   let cn = 'no-cert';
-  if (req.socket && req.socket.getPeerCertificate) {
-    const peer = req.socket.getPeerCertificate();
-    if (peer && peer.subject && peer.subject.CN) cn = peer.subject.CN;
+  const clientCertHeader = req.headers['x-forwarded-tls-client-cert'] || req.headers['x-forwarded-client-cert'];
+  if (clientCertHeader) {
+    // Traefik provides the cert in URL-encoded PEM format
+    // Extract CN using a simple regex (CN=value)
+    const match = clientCertHeader.match(/CN=([^,]+)/);
+    if (match) cn = match[1];
   }
 
   const now = new Date().toISOString();
@@ -330,17 +312,8 @@ app.get('/whoami', (req, res) => {
 // Start HTTP server for dashboard/API
 app.listen(3000, '0.0.0.0', () => console.log('API ready on :3000'));
 
-// mTLS HTTPS server for C2 beacon (only /beacon route)
-const c2Cert = fs.readFileSync(path.join(__dirname, 'certs/c2.gla1v3.local.crt'));
-const c2Key = fs.readFileSync(path.join(__dirname, 'certs/c2.gla1v3.local.key'));
-const caCert = fs.readFileSync(path.join(__dirname, 'certs/ca.crt'));
-
-https.createServer({
-  key: c2Key,
-  cert: c2Cert,
-  ca: caCert,
-  requestCert: true,
-  rejectUnauthorized: true
-}, c2app).listen(3001, '0.0.0.0', () => {
-  console.log('C2 mTLS server ready on :3001');
+// Start plain HTTP server for C2 beacon on :3001
+// Traefik will terminate mTLS and forward requests here
+c2app.listen(3001, '0.0.0.0', () => {
+  console.log('C2 server ready on :3001 (Traefik handles mTLS)');
 });
