@@ -60,7 +60,8 @@ export default function WorldMap({ agents, getColor, agent }) {
             <div style={{ fontFamily: 'monospace', minWidth: '200px' }}>
               <strong>{a.id}</strong><br />
               CN: <span style={{ color: '#ff7b72' }}>{a.cn}</span><br />
-              IP: {a.ip}<br />
+              {a.localIp && (<>Local IP: <span style={{ color: '#ffa657' }}>{a.localIp}</span><br /></>)}
+              Public IP: <span style={{ color: '#79c0ff' }}>{a.ip}</span><br />
               {a.geo && (<>Location: {a.geo.city || ''} {a.geo.country ? '(' + a.geo.country + ')' : ''}<br /></>)}
               Last: {new Date(a.lastSeen).toLocaleTimeString()}
             </div>

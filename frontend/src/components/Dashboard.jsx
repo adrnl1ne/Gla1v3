@@ -97,6 +97,7 @@ export default function Dashboard() {
                 <th style={{ textAlign: 'left', padding: '0.8rem' }}>Status</th>
                 <th style={{ textAlign: 'left', padding: '0.8rem' }}>ID</th>
                 <th style={{ textAlign: 'left', padding: '0.8rem' }}>CN</th>
+                <th style={{ textAlign: 'left', padding: '0.8rem' }}>IP</th>
                 <th style={{ textAlign: 'left', padding: '0.8rem' }}>Last</th>
                 <th style={{ textAlign: 'left', padding: '0.8rem' }}>Last Action</th>
               </tr>
@@ -114,6 +115,10 @@ export default function Dashboard() {
                     </td>
                     <td style={{ padding: '0.8rem', fontFamily: 'monospace' }}>{a.id}</td>
                     <td style={{ padding: '0.8rem', color: '#ff7b72' }}>{a.cn}</td>
+                    <td style={{ padding: '0.8rem', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                      {a.localIp && (<div style={{ color: '#ffa657' }}>L: {a.localIp}</div>)}
+                      <div style={{ color: '#79c0ff' }}>P: {a.ip}</div>
+                    </td>
                     <td style={{ padding: '0.8rem' }}>{new Date(a.lastSeen).toLocaleTimeString()}</td>
                     <td style={{ padding: '0.8rem', maxWidth: 240, whiteSpace: 'normal', wordBreak: 'break-word' }}>
                       <div style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}>{a.lastAction || '—'}</div>

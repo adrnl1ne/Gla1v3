@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
 
 OUT_DIR="$(cd "$(dirname "$0")" && cd .. && pwd)/certs"
 mkdir -p "$OUT_DIR"

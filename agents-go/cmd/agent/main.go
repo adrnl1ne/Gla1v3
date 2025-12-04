@@ -130,6 +130,56 @@ func main() {
 	const cmdTimeout = 3 * time.Second
 	const maxOutput = 2048
 
+	// Helper to get local IP address
+	getLocalIP := func() string {
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		defer cancel()
+		
+		var cmd *exec.Cmd
+		// Try OS-specific commands
+		if _, err := exec.LookPath("ipconfig"); err == nil {
+			// Windows
+			cmd = exec.CommandContext(ctx, "ipconfig")
+		} else if _, err := exec.LookPath("ip"); err == nil {
+			// Linux
+			cmd = exec.CommandContext(ctx, "ip", "addr", "show")
+		} else {
+			return ""
+		}
+		
+		out, err := cmd.Output()
+		if err != nil {
+			return ""
+		}
+		
+		// Parse output for IPv4 addresses (skip localhost)
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			// Windows: "IPv4 Address. . . . . . . . . . . : 192.168.1.100"
+			if strings.Contains(line, "IPv4 Address") {
+				parts := strings.Split(line, ":")
+				if len(parts) >= 2 {
+					ip := strings.TrimSpace(parts[1])
+					if !strings.HasPrefix(ip, "127.") {
+						return ip
+					}
+				}
+			}
+			// Linux: "inet 192.168.1.100/24"
+			if strings.HasPrefix(line, "inet ") && !strings.Contains(line, "127.0.0.1") {
+				parts := strings.Fields(line)
+				if len(parts) >= 2 {
+					ip := strings.Split(parts[1], "/")[0]
+					if !strings.HasPrefix(ip, "127.") {
+						return ip
+					}
+				}
+			}
+		}
+		return ""
+	}
+
 	seq := 0
 	for {
 		seq++
@@ -158,6 +208,9 @@ func main() {
 			}
 		}
 
+		// Get local IP address
+		localIP := getLocalIP()
+
 		// Build structured payload
 		payload := map[string]interface{}{
 			"agent_id": agentID,
@@ -166,8 +219,13 @@ func main() {
 			"error":    errStr,
 			"ts":       time.Now().UTC().Format(time.RFC3339),
 		}
+		
+		if localIP != "" {
+			payload["localIp"] = localIP
+		}
 
 		// Attempt to learn public IP via secure whoami endpoint on the API
+		publicIP := ""
 		if whoamiToken != "" {
 			func() {
 				req, _ := http.NewRequest("GET", "https://api.gla1v3.local/whoami", nil)
@@ -191,10 +249,53 @@ func main() {
 					return
 				}
 				if j.IP != "" {
-					payload["publicIp"] = j.IP
+					publicIP = j.IP
 					log.Printf("whoami -> publicIp: %s", j.IP)
 				}
 			}()
+		}
+		
+		// Fallback: try external IP services if whoami didn't work
+		if publicIP == "" {
+			for _, ipService := range []string{
+				"https://api.ipify.org?format=text",
+				"https://icanhazip.com",
+				"https://ifconfig.me/ip",
+			} {
+				func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					req, _ := http.NewRequestWithContext(ctx, "GET", ipService, nil)
+					req.Header.Set("User-Agent", "Gla1v3-Agent/0.1")
+					
+					// Use default HTTP client without mTLS for public services
+					plainClient := &http.Client{Timeout: 5 * time.Second}
+					resp, err := plainClient.Do(req)
+					if err != nil {
+						return
+					}
+					defer resp.Body.Close()
+					if resp.StatusCode != 200 {
+						return
+					}
+					var buf bytes.Buffer
+					if _, err := buf.ReadFrom(resp.Body); err != nil {
+						return
+					}
+					ip := strings.TrimSpace(buf.String())
+					if ip != "" && len(ip) < 50 { // sanity check
+						publicIP = ip
+						log.Printf("External IP service -> publicIp: %s", ip)
+					}
+				}()
+				if publicIP != "" {
+					break
+				}
+			}
+		}
+		
+		if publicIP != "" {
+			payload["publicIp"] = publicIP
 		}
 
 		bodyBytes, jerr := json.Marshal(payload)
