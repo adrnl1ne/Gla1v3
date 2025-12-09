@@ -7,6 +7,9 @@
 - Windows 10 ISO OR Ubuntu 22.04 ISO downloaded
 - At least 8GB free RAM
 - 60GB free disk space
+- **Shared folder configured** (recommended for easy script transfer)
+  - VMware: VM Settings → Options → Shared Folders → Add your Gla1v3 repo folder
+  - VirtualBox: VM Settings → Shared Folders → Add your Gla1v3 repo folder
 
 ## Fastest Path: Manual VM Setup
 
@@ -51,10 +54,14 @@ Machine → New
 
 **Windows** (run as Administrator):
 ```powershell
-# Download setup script
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/adrnl1ne/Gla1v3/VmConfigForAgentDeployment/vm-templates/setup-windows-target.ps1" -OutFile "$env:TEMP\setup.ps1"
+# Option 1: Copy from VMware/VirtualBox shared folder
+Copy-Item "\\vmware-host\Shared Folders\Gla1v3\vm-templates\setup-windows-target.ps1" -Destination "$env:TEMP\setup.ps1"
+# Or for VirtualBox: Copy-Item "\\vboxsvr\Gla1v3\vm-templates\setup-windows-target.ps1" -Destination "$env:TEMP\setup.ps1"
 
-# Or copy from USB/shared folder
+# Option 2: Download from local C2 server (if backend is serving static files)
+# Invoke-WebRequest -Uri "http://192.168.56.1:3000/setup-windows-target.ps1" -OutFile "$env:TEMP\setup.ps1"
+
+# Option 3: Copy from USB/mounted drive
 # Copy-Item "E:\setup-windows-target.ps1" -Destination "$env:TEMP\setup.ps1"
 
 # Run setup
@@ -63,11 +70,15 @@ PowerShell -ExecutionPolicy Bypass -File "$env:TEMP\setup.ps1" -C2Server 192.168
 
 **Ubuntu:**
 ```bash
-# Download setup script
-wget https://raw.githubusercontent.com/adrnl1ne/Gla1v3/VmConfigForAgentDeployment/vm-templates/setup-linux-target.sh -O /tmp/setup.sh
+# Option 1: Copy from VMware shared folder
+sudo cp /mnt/hgfs/Gla1v3/vm-templates/setup-linux-target.sh /tmp/setup.sh
+# Or for VirtualBox: sudo cp /media/sf_Gla1v3/vm-templates/setup-linux-target.sh /tmp/setup.sh
 
-# Or copy from shared folder
-# cp /media/sf_shared/setup-linux-target.sh /tmp/setup.sh
+# Option 2: Download from local C2 server (if backend is serving static files)
+# wget http://192.168.56.1:3000/setup-linux-target.sh -O /tmp/setup.sh
+
+# Option 3: Use SCP from Windows host (if SSH is enabled)
+# From Windows: scp C:\Users\YourUser\source\repos\Gla1v3\vm-templates\setup-linux-target.sh vagrant@192.168.56.11:/tmp/setup.sh
 
 # Run setup
 chmod +x /tmp/setup.sh

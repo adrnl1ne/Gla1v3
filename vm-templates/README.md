@@ -50,16 +50,33 @@ vm-templates/
 - Enable SSH on Ubuntu
 
 ### 3. Run Setup Script
-Transfer the setup script to your VM (USB drive, shared folder, or download), then run:
+Transfer the setup script to your VM using one of these methods:
+
+**Option A: VMware/VirtualBox Shared Folder** (Recommended)
+- Enable shared folders in VM settings
+- Share your Gla1v3 repository folder from host
+
+**Option B: Host C2 Server Files**
+- Copy scripts to `backend/public/` folder
+- Access via `http://192.168.56.1:3000/`
+
+**Option C: SCP Transfer**
+- Use Windows OpenSSH or PuTTY/WinSCP
+- Transfer from host to VM over network
 
 **Windows** (PowerShell as Administrator):
 ```powershell
-.\setup-windows-target.ps1 -C2Server "192.168.56.1"
+# From shared folder
+Copy-Item "\\vmware-host\Shared Folders\Gla1v3\vm-templates\setup-windows-target.ps1" -Destination "$env:TEMP\setup.ps1"
+PowerShell -ExecutionPolicy Bypass -File "$env:TEMP\setup.ps1" -C2Server "192.168.56.1"
 ```
 
 **Linux**:
 ```bash
-sudo C2_SERVER="192.168.56.1" ./setup-linux-target.sh
+# From shared folder
+sudo cp /mnt/hgfs/Gla1v3/vm-templates/setup-linux-target.sh /tmp/setup.sh
+chmod +x /tmp/setup.sh
+sudo C2_SERVER="192.168.56.1" /tmp/setup.sh
 ```
 
 ### 4. Take Snapshot

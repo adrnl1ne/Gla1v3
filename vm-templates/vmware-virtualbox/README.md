@@ -131,15 +131,22 @@ sudo apt install virtualbox-guest-additions-iso -y
    ```
 
 **Ubuntu:**
-1. Download setup script:
+1. Copy setup script from shared folder or hosted server:
    ```bash
-   wget https://raw.githubusercontent.com/YOUR_REPO/Gla1v3/main/vm-templates/setup-linux-target.sh
-   chmod +x setup-linux-target.sh
+   # Option 1: VMware shared folder
+   sudo cp /mnt/hgfs/Gla1v3/vm-templates/setup-linux-target.sh /tmp/setup.sh
+   
+   # Option 2: VirtualBox shared folder
+   sudo cp /media/sf_Gla1v3/vm-templates/setup-linux-target.sh /tmp/setup.sh
+   
+   # Option 3: Download from local C2 (if serving files)
+   wget http://192.168.56.1:3000/setup-linux-target.sh -O /tmp/setup.sh
+   
+   chmod +x /tmp/setup.sh
    ```
-2. Or use USB/shared folder to copy `setup-linux-target.sh`
-3. Run with sudo:
+2. Run with sudo:
    ```bash
-   sudo C2_SERVER=YOUR_C2_IP ./setup-linux-target.sh
+   sudo C2_SERVER=YOUR_C2_IP /tmp/setup.sh
    ```
 
 ### Step 5: Create Snapshot
