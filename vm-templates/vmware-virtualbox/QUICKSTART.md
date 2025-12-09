@@ -52,7 +52,7 @@ Machine → New
 **Windows** (run as Administrator):
 ```powershell
 # Download setup script
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/adrnl1ne/Gla1v3/main/vm-templates/setup-windows-target.ps1" -OutFile "$env:TEMP\setup.ps1"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/adrnl1ne/Gla1v3/VmConfigForAgentDeployment/vm-templates/setup-windows-target.ps1" -OutFile "$env:TEMP\setup.ps1"
 
 # Or copy from USB/shared folder
 # Copy-Item "E:\setup-windows-target.ps1" -Destination "$env:TEMP\setup.ps1"
@@ -64,7 +64,7 @@ PowerShell -ExecutionPolicy Bypass -File "$env:TEMP\setup.ps1" -C2Server 192.168
 **Ubuntu:**
 ```bash
 # Download setup script
-wget https://raw.githubusercontent.com/adrnl1ne/Gla1v3/main/vm-templates/setup-linux-target.sh -O /tmp/setup.sh
+wget https://raw.githubusercontent.com/adrnl1ne/Gla1v3/VmConfigForAgentDeployment/vm-templates/setup-linux-target.sh -O /tmp/setup.sh
 
 # Or copy from shared folder
 # cp /media/sf_shared/setup-linux-target.sh /tmp/setup.sh
