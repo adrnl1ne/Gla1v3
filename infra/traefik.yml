@@ -10,6 +10,9 @@ entryPoints:
     address: ":4443"
     forwardedHeaders:
       insecure: true
+    transport:
+      respondingTimeouts:
+        readTimeout: 30s
 
 providers:
   docker:

@@ -1,0 +1,102 @@
+<!-- Custom Wazuh Rules for Gla1v3 Agent Detection -->
+<!-- Place this file in /var/ossec/etc/rules/local_rules.xml -->
+
+<group name="local,syslog,sshd,">
+
+  <!-- Rule to detect file enumeration activity -->
+  <rule id="100001" level="10">
+    <if_sid>530</if_sid>
+    <match>agent-fileenum</match>
+    <description>Suspicious file enumeration detected - Gla1v3 agent activity</description>
+    <mitre>
+      <id>T1083</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule to detect file access in sensitive directories -->
+  <rule id="100002" level="8">
+    <if_group>syscheck</if_group>
+    <match>/etc/passwd|/etc/shadow|Documents|Downloads|Desktop</match>
+    <description>File access in sensitive directory detected</description>
+    <mitre>
+      <id>T1083</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule to detect network scanning activity -->
+  <rule id="100003" level="12">
+    <if_sid>530</if_sid>
+    <match>agent-netscan</match>
+    <description>Network scanning activity detected - Gla1v3 agent</description>
+    <mitre>
+      <id>T1046</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule to detect port scanning from process execution -->
+  <rule id="100004" level="10">
+    <if_group>syslog</if_group>
+    <match>SYN_SENT|connect\(\)</match>
+    <description>Connection attempt detected - possible port scan</description>
+    <mitre>
+      <id>T1046</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule to detect system reconnaissance commands -->
+  <rule id="100005" level="10">
+    <if_sid>530</if_sid>
+    <match>agent-sysinfo</match>
+    <description>System reconnaissance detected - Gla1v3 agent activity</description>
+    <mitre>
+      <id>T1082</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule to detect suspicious command execution pattern -->
+  <rule id="100006" level="10">
+    <if_group>syslog</if_group>
+    <match>whoami|uname -a|ps aux|netstat|systeminfo</match>
+    <description>Reconnaissance command executed</description>
+    <mitre>
+      <id>T1082</id>
+      <id>T1057</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule to detect process execution from /opt/gla1v3/agents/ directory -->
+  <rule id="100007" level="8">
+    <if_group>syslog</if_group>
+    <match>/opt/gla1v3/agents/</match>
+    <description>Process executed from Gla1v3 agents directory</description>
+  </rule>
+
+  <!-- Rule to detect auditd events for suspicious file operations -->
+  <rule id="100008" level="6">
+    <if_group>audit</if_group>
+    <match>type=SYSCALL.*syscall=(open|openat|stat|lstat)</match>
+    <description>File system operation detected via auditd</description>
+    <mitre>
+      <id>T1083</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule to detect auditd network socket creation -->
+  <rule id="100009" level="6">
+    <if_group>audit</if_group>
+    <match>type=SYSCALL.*syscall=socket</match>
+    <description>Socket operation detected via auditd</description>
+    <mitre>
+      <id>T1046</id>
+      <id>T1049</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule to detect execution of Go binaries (common for our agents) -->
+  <rule id="100010" level="6">
+    <if_group>syslog</if_group>
+    <match>agent-fileenum-linux|agent-netscan-linux|agent-sysinfo-linux|agent-linux</match>
+    <description>Gla1v3 agent binary executed</description>
+  </rule>
+
+</group>
