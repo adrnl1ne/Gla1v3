@@ -3,6 +3,9 @@ const fs = require('fs');
 const https = require('https');
 const tls = require('tls');
 const path = require('path');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const app = express();
 // Separate app for C2 mTLS (HTTPS)
 const c2app = express();
@@ -12,6 +15,50 @@ const c2app = express();
 const agents = new Map();
 const taskQueue = new Map(); // agentID -> [{ id, cmd, args, status, createdAt, result }]
 const geoip = require('geoip-lite');
+
+// Security configuration
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+const SALT_ROUNDS = 10;
+
+// User storage (in-memory for MVP - move to database for production)
+const users = new Map();
+
+// Initialize default admin user
+(async () => {
+  const adminPassword = await bcrypt.hash(process.env.ADMIN_PASSWORD || 'admin', SALT_ROUNDS);
+  users.set('admin', {
+    userId: 'admin',
+    username: 'admin',
+    passwordHash: adminPassword,
+    role: 'admin',
+    createdAt: new Date().toISOString()
+  });
+  console.log('Default admin user initialized (username: admin)');
+})();
+
+// Session storage for tracking active sessions
+const activeSessions = new Map(); // sessionId -> { userId, role, createdAt, expiresAt, certId }
+
+// Audit log storage
+const auditLog = [];
+
+// EDR Configuration storage — in-memory for MVP (can persist to file/DB later)
+// Each EDR config: { id, name, type, url, user, pass, enabled, createdAt }
+const edrConfigs = new Map();
+
+// Initialize with default Wazuh EDR from environment
+// TODO: Change WAZUH_URL to HTTPS for defense in depth
+// TODO: Ensure all alert queries route through EDR proxy (localhost:3002) instead of direct connection
+edrConfigs.set('wazuh-default', {
+  id: 'wazuh-default',
+  name: 'Wazuh EDR',
+  type: 'wazuh',
+  url: process.env.WAZUH_URL || 'https://host.docker.internal:55000',
+  user: process.env.WAZUH_USER || 'wazuh-wui',
+  pass: process.env.WAZUH_PASS || 'wazuh-wui',
+  enabled: true,
+  createdAt: new Date().toISOString()
+});
 const extractCN = (pem) => {
   try {
     // Remove header/footer and newlines
@@ -87,6 +134,263 @@ app.use((req, res, next) => {
 
 app.get('/health', (req, res) => res.send('OK'));
 
+// Middleware: JWT Authentication
+function authenticateJWT(req, res, next) {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  
+  const token = authHeader.slice(7);
+  
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    
+    // Check if session is still valid
+    const session = activeSessions.get(decoded.sessionId);
+    if (!session || new Date(session.expiresAt) < new Date()) {
+      return res.status(403).json({ error: 'Session expired' });
+    }
+    
+    next();
+  } catch (err) {
+    return res.status(403).json({ error: 'Invalid or expired token' });
+  }
+}
+
+// Middleware: Role-based access control
+function requireRole(role) {
+  return (req, res, next) => {
+    if (req.user.role !== role && req.user.role !== 'admin') {
+      return res.status(403).json({ error: `${role} role required` });
+    }
+    next();
+  };
+}
+
+// Middleware: Audit logging
+function auditAction(action) {
+  return (req, res, next) => {
+    const originalJson = res.json;
+    res.json = function(data) {
+      auditLog.push({
+        timestamp: new Date().toISOString(),
+        action,
+        user: req.user?.userId || 'anonymous',
+        ip: req.ip,
+        success: res.statusCode < 400,
+        statusCode: res.statusCode
+      });
+      return originalJson.call(this, data);
+    };
+    next();
+  };
+}
+
+// Authentication Endpoints
+
+// Login endpoint
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
+  
+  const user = users.get(username);
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+  
+  const validPassword = await bcrypt.compare(password, user.passwordHash);
+  if (!validPassword) {
+    auditLog.push({
+      timestamp: new Date().toISOString(),
+      action: 'LOGIN_FAILED',
+      username,
+      ip: req.ip
+    });
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+  
+  // Generate session
+  const sessionId = crypto.randomBytes(32).toString('hex');
+  const expiresIn = 3600; // 1 hour
+  const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+  
+  // Request certificate from CA service
+  let certData = null;
+  try {
+    const caRes = await fetch('http://ca-service:3003/generate-cert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: user.userId,
+        sessionId,
+        role: user.role,
+        ttl: expiresIn
+      })
+    });
+    
+    if (caRes.ok) {
+      certData = await caRes.json();
+    }
+  } catch (err) {
+    console.error('Failed to generate session certificate:', err);
+    // Continue without cert - non-blocking
+  }
+  
+  // Create JWT token
+  const token = jwt.sign(
+    {
+      userId: user.userId,
+      username: user.username,
+      role: user.role,
+      sessionId
+    },
+    JWT_SECRET,
+    { expiresIn: `${expiresIn}s` }
+  );
+  
+  // Store session
+  activeSessions.set(sessionId, {
+    userId: user.userId,
+    role: user.role,
+    createdAt: new Date().toISOString(),
+    expiresAt,
+    certId: certData?.certId
+  });
+  
+  auditLog.push({
+    timestamp: new Date().toISOString(),
+    action: 'LOGIN_SUCCESS',
+    user: user.userId,
+    sessionId,
+    ip: req.ip
+  });
+  
+  res.json({
+    token,
+    user: {
+      userId: user.userId,
+      username: user.username,
+      role: user.role
+    },
+    session: {
+      sessionId,
+      expiresAt
+    },
+    certificate: certData ? {
+      cert: certData.cert,
+      key: certData.key,
+      caCert: certData.caCert,
+      expiresAt: certData.expiresAt
+    } : null
+  });
+});
+
+// Logout endpoint
+app.post('/api/auth/logout', authenticateJWT, async (req, res) => {
+  const session = activeSessions.get(req.user.sessionId);
+  
+  // Revoke certificate if exists
+  if (session?.certId) {
+    try {
+      await fetch('http://ca-service:3003/revoke-cert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ certId: session.certId, reason: 'User logout' })
+      });
+    } catch (err) {
+      console.error('Failed to revoke certificate:', err);
+    }
+  }
+  
+  activeSessions.delete(req.user.sessionId);
+  
+  auditLog.push({
+    timestamp: new Date().toISOString(),
+    action: 'LOGOUT',
+    user: req.user.userId,
+    sessionId: req.user.sessionId
+  });
+  
+  res.json({ message: 'Logged out successfully' });
+});
+
+// Refresh token endpoint
+app.post('/api/auth/refresh', authenticateJWT, (req, res) => {
+  const expiresIn = 3600;
+  
+  const token = jwt.sign(
+    {
+      userId: req.user.userId,
+      username: req.user.username,
+      role: req.user.role,
+      sessionId: req.user.sessionId
+    },
+    JWT_SECRET,
+    { expiresIn: `${expiresIn}s` }
+  );
+  
+  // Extend session expiration
+  const session = activeSessions.get(req.user.sessionId);
+  if (session) {
+    session.expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+  }
+  
+  res.json({ token });
+});
+
+// User management endpoints (admin only)
+app.post('/api/users', authenticateJWT, requireRole('admin'), auditAction('CREATE_USER'), async (req, res) => {
+  const { username, password, role } = req.body;
+  
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
+  
+  if (users.has(username)) {
+    return res.status(409).json({ error: 'User already exists' });
+  }
+  
+  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+  const user = {
+    userId: username,
+    username,
+    passwordHash,
+    role: role || 'operator',
+    createdAt: new Date().toISOString()
+  };
+  
+  users.set(username, user);
+  
+  res.status(201).json({
+    userId: user.userId,
+    username: user.username,
+    role: user.role,
+    createdAt: user.createdAt
+  });
+});
+
+app.get('/api/users', authenticateJWT, requireRole('admin'), (req, res) => {
+  const userList = Array.from(users.values()).map(u => ({
+    userId: u.userId,
+    username: u.username,
+    role: u.role,
+    createdAt: u.createdAt
+  }));
+  res.json(userList);
+});
+
+// Audit log endpoint
+app.get('/api/audit', authenticateJWT, requireRole('admin'), (req, res) => {
+  const limit = parseInt(req.query.limit) || 100;
+  const logs = auditLog.slice(-limit).reverse();
+  res.json({ total: auditLog.length, logs });
+});
 
 // Only /beacon route on c2app (mTLS)
 c2app.use(express.json({ limit: '8kb' }));
@@ -99,12 +403,23 @@ const sanitize = (s, maxLen = 1024) => {
   return out;
 };
 
-// Fetch Wazuh alert (non-blocking background call). Uses env vars WAZUH_URL, WAZUH_USER, WAZUH_PASS
-async function fetchWazuhAlert(agentId, output) {
+// Generic EDR alert fetcher — supports multiple EDR types
+async function fetchEDRAlert(edrConfig, agentId, output) {
+  if (!edrConfig || !edrConfig.enabled) return null;
+  
+  if (edrConfig.type === 'wazuh') {
+    return await fetchWazuhAlert(edrConfig, agentId, output);
+  }
+  // Add support for other EDR types here (e.g., CrowdStrike, SentinelOne)
+  return null;
+}
+
+// Fetch Wazuh alert (non-blocking background call). Uses EDR config
+async function fetchWazuhAlert(edrConfig, agentId, output) {
   try {
-    const base = process.env.WAZUH_URL || 'https://wazuh-manager:55000';
-    const user = process.env.WAZUH_USER || 'wazuh';
-    const pass = process.env.WAZUH_PASS || 'password';
+    const base = edrConfig.url;
+    const user = edrConfig.user;
+    const pass = edrConfig.pass;
     // Simple search: limit to recent alerts for the agent
     const q = encodeURIComponent(`agent.name:${agentId}`);
     const urlStr = `${base.replace(/\/$/, '')}/alerts?q=${q}&limit=1&sort=-@timestamp`;
@@ -289,11 +604,20 @@ c2app.post('/beacon', (req, res) => {
   agent.detection = 'pending';
   agents.set(agentID, agent);
 
-  // Background Wazuh check — do not block the response
+  // Background EDR check — query all enabled EDRs (do not block the response)
   (async () => {
-    const alert = await fetchWazuhAlert(agentID, output);
-    if (alert) {
-      agent.detection = `Detected: ${alert.description} (rule ${alert.rule_id})`;
+    const enabledEDRs = Array.from(edrConfigs.values()).filter(e => e.enabled);
+    const detections = [];
+    
+    for (const edr of enabledEDRs) {
+      const alert = await fetchEDRAlert(edr, agentID, output);
+      if (alert) {
+        detections.push(`[${edr.name}] ${alert.description} (rule ${alert.rule_id})`);
+      }
+    }
+    
+    if (detections.length > 0) {
+      agent.detection = detections.join(' | ');
     } else {
       agent.detection = 'No detection';
     }
@@ -377,57 +701,391 @@ app.post('/api/agents/:agentId/tasks/:taskId/result', (req, res) => {
   res.json(task);
 });
 
-// EDR Alerts endpoint — read Wazuh alerts from volume as root
-// MVP approach: read alerts.json with elevated permissions
-// This works without needing wazuh-indexer (simplified architecture)
+// EDR Alerts endpoint — aggregate alerts from all enabled EDRs
+// Supports filtering by ?edr=<edr-id> query parameter
 app.get('/api/alerts/recent', async (req, res) => {
   try {
-    const alertsFilePath = '/wazuh-alerts/logs/alerts/alerts.json';
-    
-    // Read last 100 lines from alerts.json (each line is one JSON alert)
-    // Use child_process with sudo/elevated perms if needed
     const { exec } = require('child_process');
     const util = require('util');
     const execPromise = util.promisify(exec);
     
-    // Try reading with cat (will work if container runs as root or file is readable)
-    const { stdout } = await execPromise(`tail -n 100 ${alertsFilePath} 2>&1 || echo ""`).catch(() => ({ stdout: '' }));
+    const filterEdrId = req.query.edr; // Optional filter by EDR ID
+    const enabledEDRs = Array.from(edrConfigs.values())
+      .filter(e => e.enabled)
+      .filter(e => !filterEdrId || e.id === filterEdrId);
     
-    if (!stdout || !stdout.trim() || stdout.includes('Permission denied') || stdout.includes('No such file')) {
-      console.log('No Wazuh alerts accessible yet (file missing or permission issue)');
-      return res.json([]);
+    let allAlerts = [];
+    
+    // For each enabled EDR, fetch alerts
+    for (const edr of enabledEDRs) {
+      if (edr.type === 'wazuh') {
+        // Read Wazuh alerts from file (assumes alerts.json is available)
+        const alertsFilePath = '/wazuh-alerts/logs/alerts/alerts.json';
+        const { stdout } = await execPromise(`tail -n 100 ${alertsFilePath} 2>&1 || echo ""`).catch(() => ({ stdout: '' }));
+        
+        if (!stdout || !stdout.trim() || stdout.includes('Permission denied') || stdout.includes('No such file')) {
+          console.log(`No Wazuh alerts accessible for ${edr.name} (file missing or permission issue)`);
+          continue;
+        }
+        
+        const lines = stdout.trim().split('\n').filter(Boolean);
+        
+        // Parse each line as JSON and map to frontend format
+        const alerts = lines
+          .map(line => {
+            try {
+              return JSON.parse(line);
+            } catch (e) {
+              return null;
+            }
+          })
+          .filter(Boolean)
+          .map(alert => ({
+            edrId: edr.id,
+            edrName: edr.name,
+            timestamp: alert.timestamp || new Date().toISOString(),
+            agent: alert.agent?.name || 'unknown',
+            ruleId: alert.rule?.id || '0',
+            description: alert.rule?.description || 'No description',
+            level: alert.rule?.level || 0,
+            mitre: {
+              tactics: alert.rule?.mitre?.tactic || [],
+              techniques: alert.rule?.mitre?.id || []
+            }
+          }));
+        
+        allAlerts = allAlerts.concat(alerts);
+        console.log(`Fetched ${alerts.length} alerts from ${edr.name}`);
+      }
+      // Add support for other EDR types here
     }
     
-    const lines = stdout.trim().split('\n').filter(Boolean);
+    // Sort by timestamp descending (most recent first)
+    allAlerts.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     
-    // Parse each line as JSON and map to frontend format
-    const alerts = lines
-      .map(line => {
-        try {
-          return JSON.parse(line);
-        } catch (e) {
-          return null;
-        }
-      })
-      .filter(Boolean)
-      .map(alert => ({
-        timestamp: alert.timestamp || new Date().toISOString(),
-        agent: alert.agent?.name || 'unknown',
-        ruleId: alert.rule?.id || '0',
-        description: alert.rule?.description || 'No description',
-        level: alert.rule?.level || 0,
-        mitre: {
-          tactics: alert.rule?.mitre?.tactic || [],
-          techniques: alert.rule?.mitre?.id || []
-        }
-      }))
-      .reverse(); // Most recent first
-
-    console.log(`Fetched ${alerts.length} Wazuh alerts from file`);
-    res.json(alerts);
+    console.log(`Total alerts returned: ${allAlerts.length} (filtered by: ${filterEdrId || 'all'})`);
+    res.json(allAlerts);
   } catch (err) {
-    console.error('Wazuh alerts fetch error:', err.message);
-    res.status(500).json({ error: 'Failed to fetch Wazuh alerts', details: err.message });
+    console.error('EDR alerts fetch error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch EDR alerts', details: err.message });
+  }
+});
+
+// EDR Configuration Management Endpoints
+
+// Get all EDR configurations
+app.get('/api/edr-configs', (req, res) => {
+  const configs = Array.from(edrConfigs.values()).map(c => ({
+    ...c,
+    pass: '***' // Don't expose passwords
+  }));
+  res.json(configs);
+});
+
+// Get single EDR configuration
+app.get('/api/edr-configs/:id', (req, res) => {
+  const config = edrConfigs.get(req.params.id);
+  if (!config) {
+    return res.status(404).json({ error: 'EDR configuration not found' });
+  }
+  res.json({ ...config, pass: '***' });
+});
+
+// Create new EDR configuration
+app.post('/api/edr-configs', (req, res) => {
+  const { name, type, url, user, pass, enabled } = req.body;
+  
+  if (!name || !type || !url) {
+    return res.status(400).json({ error: 'name, type, and url are required' });
+  }
+  
+  const id = `edr-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const config = {
+    id,
+    name,
+    type,
+    url,
+    user: user || '',
+    pass: pass || '',
+    enabled: enabled !== false, // Default to enabled
+    createdAt: new Date().toISOString()
+  };
+  
+  edrConfigs.set(id, config);
+  console.log(`Created EDR config: ${name} (${type}) at ${url}`);
+  
+  res.status(201).json({ ...config, pass: '***' });
+});
+
+// Update EDR configuration
+app.put('/api/edr-configs/:id', (req, res) => {
+  const id = req.params.id;
+  const config = edrConfigs.get(id);
+  
+  if (!config) {
+    return res.status(404).json({ error: 'EDR configuration not found' });
+  }
+  
+  const { name, type, url, user, pass, enabled } = req.body;
+  
+  // Update only provided fields
+  if (name !== undefined) config.name = name;
+  if (type !== undefined) config.type = type;
+  if (url !== undefined) config.url = url;
+  if (user !== undefined) config.user = user;
+  if (pass !== undefined && pass !== '***') config.pass = pass; // Only update if not masked
+  if (enabled !== undefined) config.enabled = enabled;
+  config.updatedAt = new Date().toISOString();
+  
+  edrConfigs.set(id, config);
+  console.log(`Updated EDR config: ${config.name}`);
+  
+  res.json({ ...config, pass: '***' });
+});
+
+// Delete EDR configuration
+app.delete('/api/edr-configs/:id', authenticateJWT, requireRole('admin'), (req, res) => {
+  const id = req.params.id;
+  const config = edrConfigs.get(id);
+  
+  if (!config) {
+    return res.status(404).json({ error: 'EDR configuration not found' });
+  }
+  
+  edrConfigs.delete(id);
+  console.log(`Deleted EDR config: ${config.name}`);
+  
+  res.json({ message: 'EDR configuration deleted', id });
+});
+
+// ==================== AGENT DEPLOYMENT ====================
+const { Client } = require('ssh2');
+const { spawn } = require('child_process');
+const os = require('os');
+
+// Compile agent with custom configuration
+function compileAgent(config) {
+  return new Promise((resolve, reject) => {
+    const { beaconInterval, c2Server } = config;
+    
+    // Build flags to inject configuration
+    const ldflags = `-X main.BeaconInterval=${beaconInterval} -X main.C2Server=${c2Server}`;
+    
+    // Generate unique filename for this build
+    const timestamp = Date.now();
+    const outputPath = path.join(__dirname, 'agents', `gla1v3-agent-linux-${timestamp}`);
+    const agentSourcePath = path.join(__dirname, '..', 'agents-go', 'cmd', 'agent');
+    
+    console.log(`[Compile] Building agent with config:`, config);
+    console.log(`[Compile] Output: ${outputPath}`);
+    console.log(`[Compile] Ldflags: ${ldflags}`);
+    
+    // Spawn go build process
+    const buildEnv = { ...process.env, GOOS: 'linux', GOARCH: 'amd64' };
+    const goProcess = spawn('go', ['build', '-ldflags', ldflags, '-o', outputPath, agentSourcePath], {
+      cwd: path.join(__dirname, '..', 'agents-go'),
+      env: buildEnv
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    goProcess.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    
+    goProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+      console.log(`[Compile] ${data.toString().trim()}`);
+    });
+    
+    goProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log(`[Compile] Build successful: ${outputPath}`);
+        resolve(outputPath);
+      } else {
+        console.error(`[Compile] Build failed with code ${code}`);
+        console.error(`[Compile] stderr: ${stderr}`);
+        reject(new Error(`Go build failed: ${stderr || 'Unknown error'}`));
+      }
+    });
+    
+    goProcess.on('error', (err) => {
+      reject(new Error(`Failed to spawn go build: ${err.message}`));
+    });
+  });
+}
+
+// Deploy agent to Linux target via SSH
+app.post('/api/agents/deploy', authenticateJWT, requireRole(['admin']), auditAction('DEPLOY_AGENT'), async (req, res) => {
+  const { targetIP, sshUsername, sshPassword, agentName, agentConfig } = req.body;
+  
+  if (!targetIP || !sshUsername || !sshPassword || !agentName) {
+    return res.status(400).json({ error: 'Missing required fields: targetIP, sshUsername, sshPassword, agentName' });
+  }
+
+  // Default agent configuration
+  const config = {
+    beaconInterval: agentConfig?.beaconInterval || '30s',
+    c2Server: agentConfig?.c2Server || 'c2.gla1v3.local:4443'
+  };
+
+  let agentBinaryPath = null;
+
+  try {
+    // Step 1: Compile agent with custom configuration
+    console.log(`[Deploy] Compiling agent with configuration...`);
+    agentBinaryPath = await compileAgent(config);
+    
+    // Step 2: Generate session certificate for the agent
+    console.log(`[Deploy] Generating session certificate for agent: ${agentName}`);
+    const caResponse = await fetch('http://ca-service:3003/generate-cert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        userId: agentName, 
+        commonName: agentName 
+      })
+    });
+
+    if (!caResponse.ok) {
+      throw new Error(`CA service error: ${caResponse.statusText}`);
+    }
+
+    const certBundle = await caResponse.json();
+    
+    // Step 3: Read compiled agent binary
+    const agentBinary = fs.readFileSync(agentBinaryPath);
+    
+    // Step 3: Read installation script
+    const installScript = fs.readFileSync(path.join(__dirname, 'agents', 'install-agent.sh'), 'utf8');
+
+    // Step 4: SSH connection and deployment
+    console.log(`[Deploy] Connecting to ${targetIP} via SSH...`);
+    
+    const conn = new Client();
+    
+    const deploymentResult = await new Promise((resolve, reject) => {
+      let deployOutput = '';
+      
+      conn.on('ready', () => {
+        console.log(`[Deploy] SSH connection established`);
+        
+        // Transfer files via SFTP
+        conn.sftp((err, sftp) => {
+          if (err) return reject(err);
+          
+          console.log(`[Deploy] Transferring agent binary...`);
+          
+          // Transfer agent binary
+          const agentStream = sftp.createWriteStream('/tmp/gla1v3-agent');
+          agentStream.on('close', () => {
+            console.log(`[Deploy] Agent binary transferred`);
+            
+            // Transfer certificates
+            console.log(`[Deploy] Transferring certificates...`);
+            
+            const certStream = sftp.createWriteStream('/tmp/agent-cert.pem');
+            certStream.on('close', () => {
+              
+              const keyStream = sftp.createWriteStream('/tmp/agent-key.pem');
+              keyStream.on('close', () => {
+                
+                const caStream = sftp.createWriteStream('/tmp/ca.crt');
+                caStream.on('close', () => {
+                  
+                  // Transfer install script
+                  console.log(`[Deploy] Transferring installation script...`);
+                  const scriptStream = sftp.createWriteStream('/tmp/install-agent.sh');
+                  scriptStream.on('close', () => {
+                    
+                    sftp.end();
+                    
+                    // Execute installation script
+                    console.log(`[Deploy] Executing installation script...`);
+                    conn.exec(`chmod +x /tmp/install-agent.sh && /tmp/install-agent.sh "${agentName}" "${config.c2Server}"`, (err, stream) => {
+                      if (err) return reject(err);
+                      
+                      stream.on('close', (code, signal) => {
+                        conn.end();
+                        if (code === 0) {
+                          resolve({ success: true, output: deployOutput });
+                        } else {
+                          reject(new Error(`Installation script exited with code ${code}`));
+                        }
+                      }).on('data', (data) => {
+                        const output = data.toString();
+                        deployOutput += output;
+                        console.log(`[Deploy] ${output.trim()}`);
+                      }).stderr.on('data', (data) => {
+                        const output = data.toString();
+                        deployOutput += output;
+                        console.log(`[Deploy] STDERR: ${output.trim()}`);
+                      });
+                    });
+                    
+                  });
+                  scriptStream.write(installScript);
+                  scriptStream.end();
+                  
+                });
+                caStream.write(certBundle.ca);
+                caStream.end();
+                
+              });
+              keyStream.write(certBundle.key);
+              keyStream.end();
+              
+            });
+            certStream.write(certBundle.cert);
+            certStream.end();
+            
+          });
+          agentStream.write(agentBinary);
+          agentStream.end();
+          
+        });
+      }).on('error', (err) => {
+        reject(err);
+      }).connect({
+        host: targetIP,
+        port: 22,
+        username: sshUsername,
+        password: sshPassword,
+        readyTimeout: 30000
+      });
+    });
+
+    console.log(`[Deploy] Agent deployed successfully to ${targetIP}`);
+    
+    // Cleanup: Delete compiled binary after successful deployment
+    if (agentBinaryPath && fs.existsSync(agentBinaryPath)) {
+      fs.unlinkSync(agentBinaryPath);
+      console.log(`[Deploy] Cleaned up temporary binary: ${agentBinaryPath}`);
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Agent deployed successfully',
+      agentName,
+      targetIP,
+      config,
+      output: deploymentResult.output
+    });
+
+  } catch (error) {
+    console.error(`[Deploy] Error:`, error.message);
+    
+    // Cleanup: Delete compiled binary on error
+    if (agentBinaryPath && fs.existsSync(agentBinaryPath)) {
+      fs.unlinkSync(agentBinaryPath);
+      console.log(`[Deploy] Cleaned up temporary binary after error`);
+    }
+    
+    res.status(500).json({ 
+      error: 'Deployment failed', 
+      details: error.message 
+    });
   }
 });
 

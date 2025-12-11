@@ -1,0 +1,13 @@
+{
+  "name": "edr-proxy",
+  "version": "1.0.0",
+  "description": "Secure proxy for EDR API access with JWT auth and mTLS",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

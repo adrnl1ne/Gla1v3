@@ -1,0 +1,45 @@
+# Wazuh EDR - Separate "Customer" Environment
+# This simulates a customer's EDR infrastructure that the C2 integrates with
+# Run this separately from the main C2 infrastructure
+
+services:
+  wazuh-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wazuh-edr
+    hostname: wazuh-edr
+    restart: unless-stopped
+    ports:
+      - "1514:1514"   # Agent communication (TCP)
+      - "1515:1515"   # Agent enrollment (TCP)
+      - "55000:55000" # Wazuh API
+    environment:
+      - FILEBEAT_SSL_VERIFICATION_MODE=none
+      - WAZUH_API_USER=wazuh-wui
+      - WAZUH_API_PASSWORD=wazuh-wui
+    volumes:
+      - wazuh-data:/var/ossec
+      - ./wazuh-rules:/var/ossec/etc/rules/custom:rw
+    networks:
+      - wazuh-net
+
+  edr-proxy:
+    build: ../../edr-proxy
+    container_name: edr-proxy
+    restart: unless-stopped
+    ports:
+      - "3002:3002"  # Exposed for C2 backend to access
+    environment:
+      - JWT_SECRET=CHANGEME_SECURE_SECRET_KEY_HERE
+      - INTERNAL_TOKEN=CHANGEME_INTERNAL_TOKEN
+    networks:
+      - wazuh-net
+
+networks:
+  wazuh-net:
+    driver: bridge
+
+volumes:
+  wazuh-data:
+    driver: local

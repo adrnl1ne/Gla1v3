@@ -14,6 +14,18 @@ const AlertRow = ({ alert }) => {
       <td style={{ padding: '0.8rem', fontFamily: 'monospace', fontSize: '0.85rem', color: '#8b949e' }}>
         {new Date(alert.timestamp).toLocaleTimeString()}
       </td>
+      <td style={{ padding: '0.8rem' }}>
+        <span style={{ 
+          background: '#1f6feb', 
+          color: '#fff', 
+          padding: '3px 8px', 
+          borderRadius: 4, 
+          fontSize: '0.75rem',
+          fontWeight: '600'
+        }}>
+          {alert.edrName || 'Unknown'}
+        </span>
+      </td>
       <td style={{ padding: '0.8rem', fontFamily: 'monospace', color: '#58a6ff' }}>
         {alert.agent}
       </td>
@@ -83,11 +95,35 @@ export default function AlertTable() {
   const [alerts, setAlerts] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [edrs, setEdrs] = useState([]);
+  const [selectedEdr, setSelectedEdr] = useState('all');
+
+  // Fetch EDR configs for filter dropdown
+  useEffect(() => {
+    const fetchEDRs = async () => {
+      try {
+        const res = await fetch('https://api.gla1v3.local/api/edr-configs');
+        if (res.ok) {
+          const data = await res.json();
+          setEdrs(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch EDR configs:', err);
+      }
+    };
+    fetchEDRs();
+  }, []);
 
   useEffect(() => {
     const fetchAlerts = async () => {
       try {
-        const res = await fetch('https://api.gla1v3.local/api/alerts/recent');
+        // Build URL with optional EDR filter
+        let url = 'https://api.gla1v3.local/api/alerts/recent';
+        if (selectedEdr && selectedEdr !== 'all') {
+          url += `?edr=${selectedEdr}`;
+        }
+        
+        const res = await fetch(url);
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         }
@@ -105,7 +141,7 @@ export default function AlertTable() {
     fetchAlerts();
     const interval = setInterval(fetchAlerts, 8000); // Sync with agent beacon interval
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedEdr]);
 
   if (loading) {
     return (
@@ -124,30 +160,64 @@ export default function AlertTable() {
   }
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid #30363d' }}>
-            <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Timestamp</th>
-            <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Agent</th>
-            <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Severity</th>
-            <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Description</th>
-            <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>MITRE ATT&CK</th>
-            <th style={{ textAlign: 'center', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Mitigation</th>
-          </tr>
-        </thead>
+    <div>
+      {/* EDR Filter Dropdown */}
+      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <label style={{ color: '#8b949e', fontWeight: '600', fontSize: '0.9rem' }}>
+          Filter by EDR:
+        </label>
+        <select
+          value={selectedEdr}
+          onChange={(e) => setSelectedEdr(e.target.value)}
+          style={{
+            padding: '6px 12px',
+            background: '#0d1117',
+            border: '1px solid #30363d',
+            borderRadius: 6,
+            color: '#c9d1d9',
+            fontSize: '0.9rem',
+            cursor: 'pointer'
+          }}>
+          <option value="all">All EDRs</option>
+          {edrs.map((edr) => (
+            <option key={edr.id} value={edr.id}>
+              {edr.name} ({edr.type})
+            </option>
+          ))}
+        </select>
+        {selectedEdr !== 'all' && (
+          <span style={{ color: '#58a6ff', fontSize: '0.85rem' }}>
+            ({alerts.length} alerts)
+          </span>
+        )}
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid #30363d' }}>
+              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Timestamp</th>
+              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>EDR</th>
+              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Agent</th>
+              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Severity</th>
+              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Description</th>
+              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>MITRE ATT&CK</th>
+              <th style={{ textAlign: 'center', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Mitigation</th>
+            </tr>
+          </thead>
         <tbody>
           {alerts.length === 0 ? (
             <tr>
-              <td colSpan="6" style={{ padding: '2rem', textAlign: 'center', color: '#8b949e' }}>
-                No alerts found. System is clean or Wazuh is still initializing.
+              <td colSpan="7" style={{ padding: '2rem', textAlign: 'center', color: '#8b949e' }}>
+                No alerts found. System is clean or EDR is still initializing.
               </td>
             </tr>
           ) : (
             alerts.map((alert, idx) => <AlertRow key={idx} alert={alert} />)
           )}
         </tbody>
-      </table>
+        </table>
+      </div>
     </div>
   );
 }

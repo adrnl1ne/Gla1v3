@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import WorldMap from './WorldMap';
 import AlertTable from './AlertTable';
 import TaskPanel from './TaskPanel';
+import EDRManager from './EDRManager';
+import DeployAgent from './DeployAgent';
 
-export default function Dashboard() {
+export default function Dashboard({ user, token, onLogout }) {
   const [agents, setAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState(null);
-  const [activeTab, setActiveTab] = useState('agents'); // 'agents' or 'alerts'
+  const [activeTab, setActiveTab] = useState('agents'); // 'agents', 'alerts', 'edr-config', or 'deploy'
   const [taskAgent, setTaskAgent] = useState(null);
 
   useEffect(() => {
@@ -39,10 +41,18 @@ export default function Dashboard() {
       {/* Header */}
       <header style={{ padding: '1.5rem 2rem', background: '#161b22', borderBottom: '1px solid #30363d' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 style={{ margin: 0, color: '#58a6ff', fontSize: '2.2rem' }}>
-            GLA1V3 — LIVE AGENTS ({agents.length})
-          </h1>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div>
+            <h1 style={{ margin: 0, color: '#58a6ff', fontSize: '2.2rem' }}>
+              GLA1V3 — LIVE AGENTS ({agents.length})
+            </h1>
+            <div style={{ marginTop: '0.25rem', color: '#8b949e', fontSize: '0.85rem' }}>
+              Logged in as <span style={{ color: '#58a6ff', fontWeight: '600' }}>{user?.username}</span>
+              {user?.role && <span style={{ color: '#9e6a03', marginLeft: '0.5rem', background: '#26210c', padding: '2px 6px', borderRadius: 4 }}>
+                {user.role}
+              </span>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <button 
               onClick={() => setActiveTab('agents')}
               style={{ 
@@ -71,6 +81,49 @@ export default function Dashboard() {
               }}>
               EDR Alerts
             </button>
+            <button 
+              onClick={() => setActiveTab('edr-config')}
+              style={{ 
+                background: activeTab === 'edr-config' ? '#1f6feb' : 'transparent', 
+                border: '1px solid #30363d', 
+                color: activeTab === 'edr-config' ? '#fff' : '#58a6ff', 
+                padding: '8px 16px', 
+                borderRadius: 6, 
+                cursor: 'pointer',
+                fontWeight: '600',
+                transition: 'all 0.2s'
+              }}>
+              EDR Config
+            </button>
+            <button 
+              onClick={() => setActiveTab('deploy')}
+              style={{ 
+                background: activeTab === 'deploy' ? '#1f6feb' : 'transparent', 
+                border: '1px solid #30363d', 
+                color: activeTab === 'deploy' ? '#fff' : '#58a6ff', 
+                padding: '8px 16px', 
+                borderRadius: 6, 
+                cursor: 'pointer',
+                fontWeight: '600',
+                transition: 'all 0.2s'
+              }}>
+              Deploy Agent
+            </button>
+            <button 
+              onClick={onLogout}
+              style={{ 
+                background: 'transparent', 
+                border: '1px solid #da3633', 
+                color: '#da3633', 
+                padding: '8px 16px', 
+                borderRadius: 6, 
+                cursor: 'pointer',
+                fontWeight: '600',
+                transition: 'all 0.2s',
+                marginLeft: '1rem'
+              }}>
+              Logout
+            </button>
           </div>
         </div>
       </header>
@@ -78,11 +131,15 @@ export default function Dashboard() {
       <div style={{ flex: 1, display: 'flex', gap: '1rem', padding: '1rem' }}>
         {/* Content area — switches between agents and alerts */}
         <div style={{ flex: 1, background: '#161b22', borderRadius: '12px', padding: '1.5rem', overflow: 'auto', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
-          <h2 style={{ marginTop: 0, color: '#58a6ff' }}>
-            {activeTab === 'agents' ? 'Agent Status' : 'EDR Alerts — Live Detections'}
-          </h2>
+          {activeTab !== 'edr-config' && (
+            <h2 style={{ marginTop: 0, color: '#58a6ff' }}>
+              {activeTab === 'agents' ? 'Agent Status' : 'EDR Alerts — Live Detections'}
+            </h2>
+          )}
           
           {activeTab === 'alerts' && <AlertTable />}
+          {activeTab === 'edr-config' && <EDRManager />}
+          {activeTab === 'deploy' && <DeployAgent />}
           
           {activeTab === 'agents' && (
             <div>

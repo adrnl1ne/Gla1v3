@@ -16,69 +16,28 @@ services:
     networks:
       - gla1v3-net
 
-  postgres:
-    image: postgres:16-alpine
-    container_name: postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: gla1v3
-      POSTGRES_USER: gla1v3
-      POSTGRES_PASSWORD: gla1v3password
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - gla1v3-net
-
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning
-    volumes:
-      - redis-data:/data
-    networks:
-      - gla1v3-net
-
-  wazuh:
-    image: wazuh/wazuh-manager:4.8.2
-    container_name: wazuh
-    restart: unless-stopped
-    hostname: wazuh
-    ports:
-      - "1514:1514"
-      - "1515:1515"
-    environment:
-      - FILEBEAT_SSL_VERIFICATION_MODE=none
-    volumes:
-      - wazuh-data:/var/ossec
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.wazuh.rule=Host(`wazuh.gla1v3.local`)"
-      - "traefik.http.routers.wazuh.entrypoints=websecure"
-      - "traefik.http.routers.wazuh.tls=true"
-      - "traefik.http.services.wazuh.loadbalancer.server.port=55000"
-    networks:
-      - gla1v3-net
-
   backend:
     build: ../backend
     container_name: backend
     restart: unless-stopped
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://gla1v3:gla1v3password@postgres:5432/gla1v3
       - GLA1V3_DOMAIN=gla1v3.local
       - AGENT_WHOAMI_TOKEN=3f7b9a2d8c1e4f6a9b0c2d3e4f5a6b7c
-      - WAZUH_URL=https://wazuh:55000
+      # TODO: Change to https://host.docker.internal:55000 for better security (defense in depth)
+      # Also verify backend uses EDR proxy for queries instead of direct connection
+      - WAZUH_URL=http://host.docker.internal:55000
       - WAZUH_USER=wazuh-wui
       - WAZUH_PASS=wazuh-wui
+      - JWT_SECRET=CHANGEME_SECURE_SECRET_KEY_HERE
+      - ADMIN_PASSWORD=admin
+      - INTERNAL_TOKEN=CHANGEME_INTERNAL_TOKEN
     volumes:
       - ../certs:/app/certs:ro
-      - wazuh-data:/wazuh-alerts:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
-      - postgres
-      - redis
-      - wazuh
+      - ca-service
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.backend-api.rule=Host(`api.gla1v3.local`)"
@@ -113,11 +72,27 @@ services:
     networks:
       - gla1v3-net
 
+  ca-service:
+    build: ../ca-service
+    container_name: ca-service
+    restart: unless-stopped
+    environment:
+      - CERT_DIR=/certs
+    volumes:
+      - ca-certs:/certs
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ca-service.rule=Host(`ca.gla1v3.local`)"
+      - "traefik.http.routers.ca-service.entrypoints=websecure"
+      - "traefik.http.routers.ca-service.tls=true"
+      - "traefik.http.services.ca-service.loadbalancer.server.port=3003"
+    networks:
+      - gla1v3-net
+
+volumes:
+  ca-certs:
+    driver: local
+
 networks:
   gla1v3-net:
     driver: bridge
-
-volumes:
-  postgres-data:
-  redis-data:
-  wazuh-data:
