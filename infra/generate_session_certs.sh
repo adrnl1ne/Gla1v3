@@ -74,23 +74,6 @@ cp -f "$TRAEFIK_KEY" c2.gla1v3.local.key
 cp -f "$TRAEFIK_CERT" server.crt
 cp -f "$TRAEFIK_KEY" server.key
 
-# Agent client cert (for Go agent / other clients)
-AGENT_KEY=agent-client.key
-AGENT_CSR=agent-client.csr
-AGENT_CERT=agent-client.crt
-
-echo "Generating agent client cert (agent-client)..."
-openssl genrsa -out "$AGENT_KEY" 2048
-openssl req -new -key "$AGENT_KEY" -out "$AGENT_CSR" -subj "/CN=agent-client"
-cat > agent-client.ext <<EOF
-authorityKeyIdentifier=keyid,issuer
-basicConstraints=CA:FALSE
-keyUsage = digitalSignature, keyEncipherment
-extendedKeyUsage = clientAuth
-EOF
-openssl x509 -req -in "$AGENT_CSR" -CA "$CA_CERT" -CAkey "$CA_KEY" -CAcreateserial -out "$AGENT_CERT" -days 365 -sha256 -extfile agent-client.ext
-rm -f "$AGENT_CSR" agent-client.ext
-
 echo "Generated certs in: $OUT_DIR"
 ls -la "$OUT_DIR" || true
 

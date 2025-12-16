@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
-# Install curl for debugging
-RUN apk add --no-cache curl
+# Install dependencies: curl for debugging, Go for agent compilation
+RUN apk add --no-cache curl go
 
 WORKDIR /app
 

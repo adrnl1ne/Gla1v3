@@ -18,7 +18,7 @@ tls:
       minVersion: VersionTLS12
       clientAuth:
         caFiles:
-          - /etc/traefik/certs/ca.crt
+          - /ca-certs/ca-cert.pem
         clientAuthType: RequireAndVerifyClientCert
 
 http:

