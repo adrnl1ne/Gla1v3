@@ -3,13 +3,12 @@ import WorldMap from './WorldMap';
 import AlertTable from './AlertTable';
 import TaskPanel from './TaskPanel';
 import EDRManager from './EDRManager';
-import DeployAgent from './DeployAgent';
 import BuildAgent from './BuildAgent';
 
 export default function Dashboard({ user, token, onLogout }) {
   const [agents, setAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState(null);
-  const [activeTab, setActiveTab] = useState('agents'); // 'agents', 'alerts', 'edr-config', 'deploy', or 'build'
+  const [activeTab, setActiveTab] = useState('agents'); // 'agents', 'alerts', 'edr-config', or 'build'
   const [taskAgent, setTaskAgent] = useState(null);
 
   useEffect(() => {
@@ -97,20 +96,6 @@ export default function Dashboard({ user, token, onLogout }) {
               EDR Config
             </button>
             <button 
-              onClick={() => setActiveTab('deploy')}
-              style={{ 
-                background: activeTab === 'deploy' ? '#1f6feb' : 'transparent', 
-                border: '1px solid #30363d', 
-                color: activeTab === 'deploy' ? '#fff' : '#58a6ff', 
-                padding: '8px 16px', 
-                borderRadius: 6, 
-                cursor: 'pointer',
-                fontWeight: '600',
-                transition: 'all 0.2s'
-              }}>
-              Deploy Agent
-            </button>
-            <button 
               onClick={() => setActiveTab('build')}
               style={{ 
                 background: activeTab === 'build' ? '#1f6feb' : 'transparent', 
@@ -154,7 +139,6 @@ export default function Dashboard({ user, token, onLogout }) {
           
           {activeTab === 'alerts' && <AlertTable />}
           {activeTab === 'edr-config' && <EDRManager />}
-          {activeTab === 'deploy' && <DeployAgent />}
           {activeTab === 'build' && <BuildAgent />}
           
           {activeTab === 'agents' && (
