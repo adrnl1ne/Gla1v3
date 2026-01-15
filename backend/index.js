@@ -43,21 +43,36 @@ const activeSessions = new Map(); // sessionId -> { userId, role, createdAt, exp
 const auditLog = [];
 
 // EDR Configuration storage — in-memory for MVP (can persist to file/DB later)
-// Each EDR config: { id, name, type, url, user, pass, enabled, createdAt }
+// Each EDR config: { id, name, type, url, user, pass, enabled, authMethod, endpoints, createdAt }
 const edrConfigs = new Map();
 
 // Initialize with default Wazuh EDR from environment
-// TODO: Change WAZUH_URL to HTTPS for defense in depth
-// TODO: Ensure all alert queries route through EDR proxy (localhost:3002) instead of direct connection
-edrConfigs.set('wazuh-default', {
+// Uses host.docker.internal to access OpenSearch indexer (works across networks)
+// For production: Replace with actual indexer public IP/DNS (e.g., https://opensearch.company.com:9200)
+const defaultWazuhConfig = {
   id: 'wazuh-default',
-  name: 'Wazuh EDR',
-  type: 'wazuh',
-  url: process.env.WAZUH_URL || 'https://host.docker.internal:55000',
-  user: process.env.WAZUH_USER || 'wazuh-wui',
-  pass: process.env.WAZUH_PASS || 'wazuh-wui',
+  name: 'Wazuh EDR (OpenSearch)',
+  type: 'opensearch',
+  url: process.env.OPENSEARCH_URL || 'http://host.docker.internal:9200',
+  user: process.env.OPENSEARCH_USER || '', // OpenSearch with security disabled
+  pass: process.env.OPENSEARCH_PASS || '', // OpenSearch with security disabled
+  authMethod: process.env.OPENSEARCH_AUTH_METHOD || 'none',
+  endpoints: {
+    alerts: '/wazuh-alerts-*/_search',
+    query: {
+      "size": 500,
+      "sort": [{"timestamp": {"order": "desc"}}],
+      "query": {"match_all": {}}
+    }
+  },
   enabled: true,
   createdAt: new Date().toISOString()
+};
+edrConfigs.set('wazuh-default', defaultWazuhConfig);
+console.log('[EDR Init] Default Wazuh config:', {
+  url: defaultWazuhConfig.url,
+  authMethod: defaultWazuhConfig.authMethod,
+  endpoints: defaultWazuhConfig.endpoints
 });
 const extractCN = (pem) => {
   try {
@@ -427,12 +442,18 @@ async function fetchWazuhAlert(edrConfig, agentId, output) {
 
     console.log(`Wazuh fetch: ${urlStr} (agent=${agentId})`);
 
-    // For MVP, disable TLS verification for Wazuh API (simplifies setup)
-    // In production, use proper certificates
+    // TLS verification enabled - validates Wazuh certificate
+    // If using self-signed certs, set NODE_EXTRA_CA_CERTS environment variable
+    // or set WAZUH_ALLOW_INSECURE=true for development only
+    const allowInsecure = process.env.WAZUH_ALLOW_INSECURE === 'true';
     const httpsAgent = new https.Agent({ 
-      rejectUnauthorized: false,
+      rejectUnauthorized: !allowInsecure,
       keepAlive: true 
     });
+    
+    if (allowInsecure) {
+      console.warn('⚠️  WARNING: TLS certificate verification disabled for Wazuh API - use only in development!');
+    }
 
     const u = new URL(urlStr);
     const options = {
@@ -705,10 +726,6 @@ app.post('/api/agents/:agentId/tasks/:taskId/result', (req, res) => {
 // Supports filtering by ?edr=<edr-id> query parameter
 app.get('/api/alerts/recent', async (req, res) => {
   try {
-    const { exec } = require('child_process');
-    const util = require('util');
-    const execPromise = util.promisify(exec);
-    
     const filterEdrId = req.query.edr; // Optional filter by EDR ID
     const enabledEDRs = Array.from(edrConfigs.values())
       .filter(e => e.enabled)
@@ -716,48 +733,32 @@ app.get('/api/alerts/recent', async (req, res) => {
     
     let allAlerts = [];
     
-    // For each enabled EDR, fetch alerts
+    // For each enabled EDR, fetch alerts directly from configured API
     for (const edr of enabledEDRs) {
-      if (edr.type === 'wazuh') {
-        // Read Wazuh alerts from file (assumes alerts.json is available)
-        const alertsFilePath = '/wazuh-alerts/logs/alerts/alerts.json';
-        const { stdout } = await execPromise(`tail -n 100 ${alertsFilePath} 2>&1 || echo ""`).catch(() => ({ stdout: '' }));
+      try {
+        console.log(`[Alerts] Fetching from ${edr.name}: authMethod=${edr.authMethod}, url=${edr.url}`);
+        const rawAlerts = await fetchEDRAlerts(edr);
         
-        if (!stdout || !stdout.trim() || stdout.includes('Permission denied') || stdout.includes('No such file')) {
-          console.log(`No Wazuh alerts accessible for ${edr.name} (file missing or permission issue)`);
-          continue;
-        }
-        
-        const lines = stdout.trim().split('\n').filter(Boolean);
-        
-        // Parse each line as JSON and map to frontend format
-        const alerts = lines
-          .map(line => {
-            try {
-              return JSON.parse(line);
-            } catch (e) {
-              return null;
-            }
-          })
-          .filter(Boolean)
-          .map(alert => ({
-            edrId: edr.id,
-            edrName: edr.name,
-            timestamp: alert.timestamp || new Date().toISOString(),
-            agent: alert.agent?.name || 'unknown',
-            ruleId: alert.rule?.id || '0',
-            description: alert.rule?.description || 'No description',
-            level: alert.rule?.level || 0,
-            mitre: {
-              tactics: alert.rule?.mitre?.tactic || [],
-              techniques: alert.rule?.mitre?.id || []
-            }
-          }));
+        // Transform to standard alert format
+        const alerts = rawAlerts.map(alert => ({
+          edrId: edr.id,
+          edrName: edr.name,
+          timestamp: alert.timestamp || new Date().toISOString(),
+          agent: alert.agent?.name || alert.agent || 'unknown',
+          ruleId: alert.rule?.id || alert.ruleId || '0',
+          description: alert.rule?.description || alert.description || 'No description',
+          level: alert.rule?.level || alert.level || alert.severity || 0,
+          mitre: {
+            tactics: alert.rule?.mitre?.tactic || alert.mitre?.tactics || [],
+            techniques: alert.rule?.mitre?.id || alert.mitre?.techniques || []
+          }
+        }));
         
         allAlerts = allAlerts.concat(alerts);
-        console.log(`Fetched ${alerts.length} alerts from ${edr.name}`);
+        console.log(`Fetched ${alerts.length} alerts from ${edr.name} (${edr.type}) at ${edr.url}`);
+      } catch (error) {
+        console.error(`EDR fetch error for ${edr.name}:`, error.message);
       }
-      // Add support for other EDR types here
     }
     
     // Sort by timestamp descending (most recent first)
@@ -770,6 +771,163 @@ app.get('/api/alerts/recent', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch EDR alerts', details: err.message });
   }
 });
+
+// Generic EDR API client - works with any EDR based on configuration
+async function fetchEDRAlerts(edrConfig) {
+  const https = require('https');
+  const http = require('http');
+  const { url, user, pass, authMethod, endpoints } = edrConfig;
+  
+  // Determine if URL is HTTP or HTTPS
+  const isHttps = url.startsWith('https://');
+  const protocol = isHttps ? https : http;
+  
+  // Default endpoints if not specified
+  const alertsEndpoint = endpoints?.alerts || '/alerts';
+  const authEndpoint = endpoints?.authenticate || '/security/user/authenticate';
+  const limit = 500;
+  
+  let authToken = null;
+  
+  // Step 1: Authenticate if needed
+  if (authMethod === 'bearer' && authEndpoint) {
+    try {
+      const authData = await makeHTTPRequest(
+        `${url}${authEndpoint}`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64')
+          }
+        },
+        protocol
+      );
+      
+      // Extract token from various response formats
+      authToken = authData.data?.token || authData.token || authData.access_token;
+    } catch (error) {
+      console.error(`Auth failed for ${edrConfig.name}:`, error.message);
+      throw error;
+    }
+  }
+  
+  // Step 2: Build authorization header based on auth method
+  const headers = {};
+  
+  switch (authMethod) {
+    case 'bearer':
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+      break;
+    case 'basic':
+      headers['Authorization'] = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
+      break;
+    case 'api-key':
+      headers['X-API-Key'] = pass; // Use pass field for API key
+      break;
+    case 'custom':
+      // For custom headers, expect endpoints.customHeaders object
+      if (endpoints?.customHeaders) {
+        Object.assign(headers, endpoints.customHeaders);
+      }
+      break;
+    // 'none' or undefined = no auth
+  }
+  
+  // Step 3: Fetch alerts from configured endpoint
+  let alertsUrl = `${url}${alertsEndpoint}${alertsEndpoint.includes('?') ? '&' : '?'}size=${limit}`;
+  let requestMethod = 'GET';
+  let requestBody = null;
+  
+  // Special handling for OpenSearch/Elasticsearch
+  if (edrConfig.type === 'opensearch' || edrConfig.type === 'elasticsearch') {
+    alertsUrl = `${url}${alertsEndpoint}`;
+    requestMethod = 'POST';
+    requestBody = JSON.stringify(endpoints?.query || {
+      "size": limit,
+      "sort": [{"timestamp": {"order": "desc"}}],
+      "query": {"match_all": {}}
+    });
+    headers['Content-Type'] = 'application/json';
+  } else {
+    alertsUrl = `${url}${alertsEndpoint}${alertsEndpoint.includes('?') ? '&' : '?'}limit=${limit}`;
+  }
+  
+  console.log(`[EDR API] Fetching from: ${alertsUrl}`);
+  console.log(`[EDR API] Auth method: ${authMethod}, Headers:`, Object.keys(headers));
+  
+  try {
+    const requestOptions = { 
+      method: requestMethod, 
+      headers,
+      ...(requestBody && { body: requestBody })
+    };
+    
+    const alertsData = await makeHTTPRequest(alertsUrl, requestOptions, protocol);
+    console.log(`[EDR API] Response received, type: ${typeof alertsData}, isArray: ${Array.isArray(alertsData)}`);
+    
+    // Handle different response formats (extract array from various structures)
+    let alerts = alertsData;
+    
+    // OpenSearch/Elasticsearch format
+    if (alertsData.hits?.hits) {
+      alerts = alertsData.hits.hits.map(hit => hit._source);
+    } else if (alertsData.data?.affected_items) {
+      alerts = alertsData.data.affected_items; // Wazuh format
+    } else if (alertsData.data && Array.isArray(alertsData.data)) {
+      alerts = alertsData.data;
+    } else if (alertsData.alerts && Array.isArray(alertsData.alerts)) {
+      alerts = alertsData.alerts;
+    } else if (alertsData.results && Array.isArray(alertsData.results)) {
+      alerts = alertsData.results;
+    } else if (!Array.isArray(alertsData)) {
+      console.warn(`Unexpected response format from ${edrConfig.name}, returning empty array`);
+      alerts = [];
+    }
+    
+    return alerts;
+  } catch (error) {
+    console.error(`Alerts fetch failed for ${edrConfig.name}:`, error.message);
+    throw error;
+  }
+}
+
+// Generic HTTP/HTTPS request helper with SSL support
+function makeHTTPRequest(url, options = {}, protocol) {
+  return new Promise((resolve, reject) => {
+    const requestOptions = {
+      ...options,
+      rejectUnauthorized: false // Accept self-signed certificates
+    };
+    
+    const req = protocol.request(url, requestOptions, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            // Return raw data if not JSON
+            resolve(data);
+          }
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
+        }
+      });
+    });
+    
+    req.on('error', reject);
+    
+    // Send request body if provided
+    if (options.body) {
+      req.write(options.body);
+    }
+    
+    req.end();
+  });
+}
 
 // EDR Configuration Management Endpoints
 
@@ -793,7 +951,7 @@ app.get('/api/edr-configs/:id', (req, res) => {
 
 // Create new EDR configuration
 app.post('/api/edr-configs', (req, res) => {
-  const { name, type, url, user, pass, enabled } = req.body;
+  const { name, type, url, user, pass, enabled, endpoints, authMethod } = req.body;
   
   if (!name || !type || !url) {
     return res.status(400).json({ error: 'name, type, and url are required' });
@@ -808,6 +966,11 @@ app.post('/api/edr-configs', (req, res) => {
     user: user || '',
     pass: pass || '',
     enabled: enabled !== false, // Default to enabled
+    authMethod: authMethod || 'basic', // basic, bearer, api-key, none
+    endpoints: endpoints || {
+      alerts: '/alerts',
+      authenticate: '/security/user/authenticate'
+    },
     createdAt: new Date().toISOString()
   };
   
@@ -826,7 +989,7 @@ app.put('/api/edr-configs/:id', (req, res) => {
     return res.status(404).json({ error: 'EDR configuration not found' });
   }
   
-  const { name, type, url, user, pass, enabled } = req.body;
+  const { name, type, url, user, pass, enabled, endpoints, authMethod } = req.body;
   
   // Update only provided fields
   if (name !== undefined) config.name = name;
@@ -835,6 +998,8 @@ app.put('/api/edr-configs/:id', (req, res) => {
   if (user !== undefined) config.user = user;
   if (pass !== undefined && pass !== '***') config.pass = pass; // Only update if not masked
   if (enabled !== undefined) config.enabled = enabled;
+  if (authMethod !== undefined) config.authMethod = authMethod;
+  if (endpoints !== undefined) config.endpoints = endpoints;
   config.updatedAt = new Date().toISOString();
   
   edrConfigs.set(id, config);
@@ -1094,7 +1259,7 @@ app.post('/api/agents/:agentId/embedded-tasks', (req, res) => {
   for (const result of results) {
     // Store as a completed task
     queue.push({
-      id: result.taskID,
+      id: result.taskId,
       type: 'embedded',
       taskType: result.type,
       status: result.status,
@@ -1104,7 +1269,7 @@ app.post('/api/agents/:agentId/embedded-tasks', (req, res) => {
       completedAt: new Date().toISOString()
     });
     
-    console.log(`[EmbeddedTasks] Stored result for task ${result.taskID} (${result.type}): ${result.status}`);
+    console.log(`[EmbeddedTasks] Stored result for task ${result.taskId} (${result.type}): ${result.status}`);
   }
   
   res.json({ success: true, stored: results.length });
@@ -1130,7 +1295,132 @@ app.get('/whoami', (req, res) => {
   return res.json({ ip: sourceIp });
 });
 
+// ====== WAZUH ALERT INDEXER ======
+// Periodically index Wazuh alerts to OpenSearch
 
+async function indexWazuhAlerts() {
+  try {
+    const opensearchUrl = process.env.OPENSEARCH_URL || 'http://opensearch:9200';
+    const alertsFile = '/var/ossec/logs/alerts/alerts.json';
+    const processedFile = '/tmp/wazuh_last_alert_ts';
+    
+    if (!fs.existsSync(alertsFile)) {
+      return;
+    }
+    
+    // Read the last processed timestamp
+    let lastProcessedTs = '';
+    if (fs.existsSync(processedFile)) {
+      lastProcessedTs = fs.readFileSync(processedFile, 'utf-8').trim();
+    }
+    
+    // Read the entire file and parse all JSON objects
+    const content = fs.readFileSync(alertsFile, 'utf-8');
+    let alerts = [];
+    
+    // Split by "}{" which is where one JSON object ends and another begins
+    let buffer = '';
+    let bracketCount = 0;
+    
+    for (let i = 0; i < content.length; i++) {
+      const char = content[i];
+      buffer += char;
+      
+      if (char === '{') bracketCount++;
+      if (char === '}') {
+        bracketCount--;
+        
+        // When we close a top-level JSON object
+        if (bracketCount === 0 && buffer.trim().length > 0) {
+          try {
+            const jsonStr = buffer.trim();
+            if (jsonStr.startsWith('{') && jsonStr.endsWith('}')) {
+              const alert = JSON.parse(jsonStr);
+              alerts.push(alert);
+            }
+          } catch (e) {
+            console.log('[Indexer] JSON parse error:', e.message);
+          }
+          buffer = '';
+        }
+      }
+    }
+    
+    if (alerts.length === 0) {
+      return;
+    }
+    
+    // Filter to only new alerts (newer than the last processed timestamp)
+    const newAlerts = alerts.filter(a => {
+      if (!lastProcessedTs) return true;
+      const alertTs = a.timestamp || '';
+      return alertTs > lastProcessedTs;
+    });
+    
+    if (newAlerts.length === 0) {
+      return;
+    }
+    
+    // Index to OpenSearch
+    for (const alert of newAlerts) {
+      try {
+        const timestamp = alert.timestamp || new Date().toISOString();
+        const dateStr = timestamp.split('T')[0];
+        const indexName = `wazuh-alerts-${dateStr}`;
+        const docId = alert.id || `${Date.now()}-${Math.random()}`;
+        
+        const indexUrl = `${opensearchUrl}/${indexName}/_doc/${docId}`;
+        
+        await new Promise((resolve, reject) => {
+          const protocol = indexUrl.startsWith('https') ? require('https') : require('http');
+          const parsedUrl = new URL(indexUrl);
+          
+          const data = JSON.stringify(alert);
+          const options = {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(data)
+            },
+            rejectUnauthorized: false
+          };
+          
+          const req = protocol.request(parsedUrl, options, (res) => {
+            let responseData = '';
+            res.on('data', chunk => responseData += chunk);
+            res.on('end', () => {
+              resolve();
+            });
+          });
+          
+          req.on('error', reject);
+          req.setTimeout(5000);
+          req.write(data);
+          req.end();
+        });
+      } catch (error) {
+        console.log(`[Indexer] Index error:`, error.message);
+      }
+    }
+    
+    // Save the latest timestamp
+    if (newAlerts.length > 0) {
+      const latest = newAlerts[newAlerts.length - 1];
+      fs.writeFileSync(processedFile, latest.timestamp || new Date().toISOString(), 'utf-8');
+      console.log(`[Indexer] Indexed ${newAlerts.length}/${alerts.length} alerts`);
+    }
+  } catch (error) {
+    console.log(`[Indexer] Error:`, error.message);
+  }
+}
+
+// Start indexing alerts every 10 seconds
+setInterval(indexWazuhAlerts, 10000);
+// Run once on startup after a short delay
+setTimeout(() => {
+  console.error('[Indexer] Starting initial indexing');
+  indexWazuhAlerts().catch(err => console.error('[Indexer] Init error:', err));
+}, 3000);
 
 // Start HTTP server for dashboard/API
 app.listen(3000, '0.0.0.0', () => console.log('API ready on :3000'));

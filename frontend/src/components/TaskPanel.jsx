@@ -138,7 +138,14 @@ export default function TaskPanel({ agent, onClose }) {
                     <div key={task.id} style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: 6, padding: '0.75rem' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                         <div style={{ fontFamily: 'monospace', color: '#79c0ff', fontSize: '0.9rem' }}>
-                          {task.cmd} {task.args?.join(' ')}
+                          {task.type === 'embedded' ? (
+                            <span>
+                              <span style={{ background: '#6e40c9', color: '#fff', padding: '2px 6px', borderRadius: 3, fontSize: '0.75rem', marginRight: '0.5rem' }}>EMBEDDED</span>
+                              {task.taskType}
+                            </span>
+                          ) : (
+                            <span>{task.cmd} {task.args?.join(' ')}</span>
+                          )}
                         </div>
                         <span style={{ 
                           padding: '2px 8px', 

