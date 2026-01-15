@@ -37,102 +37,54 @@ export default function Dashboard({ user, token, onLogout }) {
   const [showMapModal, setShowMapModal] = useState(false);
 
   return (
-    <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', background: '#0d1117', color: '#c9d1d9', margin: 0, padding: 0, overflow: 'hidden', position: 'fixed', top: 0, left: 0, boxSizing: 'border-box' }}>
+    <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', background: '#0d1117', color: '#c9d1d9', margin: 0, padding: 0, position: 'fixed', top: 0, left: 0, boxSizing: 'border-box' }}>
       {/* Header */}
-      <header style={{ padding: '1.5rem 2rem', background: '#161b22', borderBottom: '1px solid #30363d' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h1 style={{ margin: 0, color: '#58a6ff', fontSize: '2.2rem' }}>
-              GLA1V3 — LIVE AGENTS ({agents.length})
-            </h1>
-            <div style={{ marginTop: '0.25rem', color: '#8b949e', fontSize: '0.85rem' }}>
+      <header className="dashboard-header">
+        <div className="header-content">
+          <div className="header-title">
+            <h1>GLA1V3 — LIVE AGENTS ({agents.length})</h1>
+            <div className="subtitle">
               Logged in as <span style={{ color: '#58a6ff', fontWeight: '600' }}>{user?.username}</span>
               {user?.role && <span style={{ color: '#9e6a03', marginLeft: '0.5rem', background: '#26210c', padding: '2px 6px', borderRadius: 4 }}>
                 {user.role}
               </span>}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <div className="header-buttons">
             <button 
               onClick={() => setActiveTab('agents')}
-              style={{ 
-                background: activeTab === 'agents' ? '#1f6feb' : 'transparent', 
-                border: '1px solid #30363d', 
-                color: activeTab === 'agents' ? '#fff' : '#58a6ff', 
-                padding: '8px 16px', 
-                borderRadius: 6, 
-                cursor: 'pointer',
-                fontWeight: '600',
-                transition: 'all 0.2s'
-              }}>
+              className={activeTab === 'agents' ? 'active' : ''}>
               Agents
             </button>
             <button 
               onClick={() => setActiveTab('alerts')}
-              style={{ 
-                background: activeTab === 'alerts' ? '#1f6feb' : 'transparent', 
-                border: '1px solid #30363d', 
-                color: activeTab === 'alerts' ? '#fff' : '#58a6ff', 
-                padding: '8px 16px', 
-                borderRadius: 6, 
-                cursor: 'pointer',
-                fontWeight: '600',
-                transition: 'all 0.2s'
-              }}>
+              className={activeTab === 'alerts' ? 'active' : ''}>
               EDR Alerts
             </button>
             <button 
               onClick={() => setActiveTab('edr-config')}
-              style={{ 
-                background: activeTab === 'edr-config' ? '#1f6feb' : 'transparent', 
-                border: '1px solid #30363d', 
-                color: activeTab === 'edr-config' ? '#fff' : '#58a6ff', 
-                padding: '8px 16px', 
-                borderRadius: 6, 
-                cursor: 'pointer',
-                fontWeight: '600',
-                transition: 'all 0.2s'
-              }}>
+              className={activeTab === 'edr-config' ? 'active' : ''}>
               EDR Config
             </button>
             <button 
               onClick={() => setActiveTab('build')}
-              style={{ 
-                background: activeTab === 'build' ? '#1f6feb' : 'transparent', 
-                border: '1px solid #30363d', 
-                color: activeTab === 'build' ? '#fff' : '#58a6ff', 
-                padding: '8px 16px', 
-                borderRadius: 6, 
-                cursor: 'pointer',
-                fontWeight: '600',
-                transition: 'all 0.2s'
-              }}>
+              className={activeTab === 'build' ? 'active' : ''}>
               Build Agent
             </button>
             <button 
               onClick={onLogout}
-              style={{ 
-                background: 'transparent', 
-                border: '1px solid #da3633', 
-                color: '#da3633', 
-                padding: '8px 16px', 
-                borderRadius: 6, 
-                cursor: 'pointer',
-                fontWeight: '600',
-                transition: 'all 0.2s',
-                marginLeft: '1rem'
-              }}>
+              className="logout">
               Logout
             </button>
           </div>
         </div>
       </header>
 
-      <div style={{ flex: 1, display: 'flex', gap: '1rem', padding: '1rem' }}>
+      <div className="dashboard-content">
         {/* Content area — switches between agents and alerts */}
-        <div style={{ flex: 1, background: '#161b22', borderRadius: '12px', padding: '1.5rem', overflow: 'auto', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
+        <div className="content-panel">
           {activeTab !== 'edr-config' && (
-            <h2 style={{ marginTop: 0, color: '#58a6ff' }}>
+            <h2>
               {activeTab === 'agents' ? 'Agent Status' : 'EDR Alerts — Live Detections'}
             </h2>
           )}
@@ -217,14 +169,14 @@ export default function Dashboard({ user, token, onLogout }) {
       {/* Map Modal */}
       {showMapModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ width: '90vw', height: '85vh', background: '#0f1720', borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 48px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ width: '90vw', height: '90vh', maxWidth: '1200px', maxHeight: '80vh', background: '#0f1720', borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 48px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 1rem', borderBottom: '1px solid #20303a' }}>
               <div style={{ color: '#58a6ff', fontWeight: '600' }}>{selectedAgent ? `Map — ${selectedAgent.id}` : 'Global Agent Map'}</div>
               <div>
                 <button onClick={() => { setShowMapModal(false); setSelectedAgent(null); }} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 10px', borderRadius: 6, cursor: 'pointer' }}>Close</button>
               </div>
             </div>
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, minHeight: 0 }}>
               {selectedAgent ? (
                 <WorldMap agent={selectedAgent} getColor={getColor} />
               ) : (

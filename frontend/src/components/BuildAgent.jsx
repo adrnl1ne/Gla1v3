@@ -83,6 +83,7 @@ export default function BuildAgent() {
   const [downloadFilename, setDownloadFilename] = useState(null);
   const [buildInfo, setBuildInfo] = useState(null);
   const [downloading, setDownloading] = useState(false);
+  const [activeSection, setActiveSection] = useState('config');
   
   const toggleTask = (taskId) => {
     setFormData(prev => ({
@@ -224,149 +225,264 @@ export default function BuildAgent() {
         <h2>Build Custom Agent</h2>
         <p className="subtitle">Configure and compile an agent with embedded certificates and tasks</p>
         
-        <div className="form-section">
-          <h3>Agent Configuration</h3>
-          
-          <div className="form-group">
-            <label>Agent ID *</label>
-            <input
-              type="text"
-              value={formData.agentId}
-              onChange={(e) => setFormData({...formData, agentId: e.target.value})}
-              placeholder="e.g., production-db-server"
-              disabled={building}
-            />
-            <small>Unique identifier for this agent</small>
-          </div>
-          
-          <div className="form-row">
-            <div className="form-group">
-              <label>Beacon Interval (seconds)</label>
-              <input
-                type="number"
-                value={formData.beaconInterval}
-                onChange={(e) => setFormData({...formData, beaconInterval: e.target.value})}
-                min="10"
-                max="3600"
-                disabled={building}
-              />
-              <small>How often agent contacts C2</small>
-            </div>
+        {/* Tabbed Interface */}
+        <div className="section-tabs">
+          <button 
+            className={`tab-button ${activeSection === 'config' ? 'active' : ''}`}
+            onClick={() => setActiveSection('config')}
+          >
+            1. Configuration
+            {formData.agentId && ' ✓'}
+          </button>
+          <button 
+            className={`tab-button ${activeSection === 'tasks' ? 'active' : ''}`}
+            onClick={() => setActiveSection('tasks')}
+          >
+            2. Select Tasks
+            {formData.selectedTasks.length > 0 && ' ✓'}
+          </button>
+          <button 
+            className={`tab-button ${activeSection === 'build' ? 'active' : ''}`}
+            onClick={() => setActiveSection('build')}
+          >
+            3. Build
+          </button>
+          {downloadUrl && (
+            <button 
+              className={`tab-button ${activeSection === 'download' ? 'active' : ''}`}
+              onClick={() => setActiveSection('download')}
+            >
+              4. Download ✓
+            </button>
+          )}
+        </div>
+        
+        {/* Scrollable Content Area */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        
+        {/* Configuration Section */}
+        {activeSection === 'config' && (
+          <div className="form-section">
+            <h3>Agent Configuration</h3>
             
             <div className="form-group">
-              <label>C2 Server</label>
+              <label>Agent ID *</label>
               <input
                 type="text"
-                value={formData.c2Server}
-                onChange={(e) => setFormData({...formData, c2Server: e.target.value})}
-                placeholder="c2.gla1v3.local:4443"
+                value={formData.agentId}
+                onChange={(e) => setFormData({...formData, agentId: e.target.value})}
+                placeholder="e.g., production-db-server"
                 disabled={building}
               />
-              <small>C2 server address and port</small>
-            </div>
-          </div>
-          
-          <div className="form-row">
-            <div className="form-group">
-              <label>Target OS</label>
-              <select
-                value={formData.targetOS}
-                onChange={(e) => setFormData({...formData, targetOS: e.target.value})}
-                disabled={building}
-              >
-                <option value="linux">Linux</option>
-                <option value="windows">Windows</option>
-                <option value="darwin">macOS</option>
-              </select>
-              <small>Operating system of target machine</small>
+              <small>Unique identifier for this agent</small>
             </div>
             
-            <div className="form-group">
-              <label>Architecture</label>
-              <select
-                value={formData.targetArch}
-                onChange={(e) => setFormData({...formData, targetArch: e.target.value})}
-                disabled={building}
-              >
-                <option value="amd64">x86_64 (64-bit)</option>
-                <option value="386">x86 (32-bit)</option>
-                <option value="arm64">ARM64</option>
-                <option value="arm">ARM (32-bit)</option>
-              </select>
-              <small>CPU architecture of target</small>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Beacon Interval (seconds)</label>
+                <input
+                  type="number"
+                  value={formData.beaconInterval}
+                  onChange={(e) => setFormData({...formData, beaconInterval: e.target.value})}
+                  min="10"
+                  max="3600"
+                  disabled={building}
+                />
+                <small>How often agent contacts C2</small>
+              </div>
+              
+              <div className="form-group">
+                <label>C2 Server</label>
+                <input
+                  type="text"
+                  value={formData.c2Server}
+                  onChange={(e) => setFormData({...formData, c2Server: e.target.value})}
+                  placeholder="c2.gla1v3.local:4443"
+                  disabled={building}
+                />
+                <small>C2 server address and port</small>
+              </div>
             </div>
-          </div>
-        </div>
-        
-        <div className="form-section">
-          <div className="section-header">
-            <h3>Select Tasks ({formData.selectedTasks.length} selected)</h3>
-            <div className="button-group">
-              {CATEGORIES.map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => setCategoryFilter(cat)}
-                  className={categoryFilter === cat ? 'active' : ''}
+            
+            <div className="form-row">
+              <div className="form-group">
+                <label>Target OS</label>
+                <select
+                  value={formData.targetOS}
+                  onChange={(e) => setFormData({...formData, targetOS: e.target.value})}
                   disabled={building}
                 >
-                  {cat}
-                </button>
-              ))}
+                  <option value="linux">Linux</option>
+                  <option value="windows">Windows</option>
+                  <option value="darwin">macOS</option>
+                </select>
+                <small>Operating system of target machine</small>
+              </div>
+              
+              <div className="form-group">
+                <label>Architecture</label>
+                <select
+                  value={formData.targetArch}
+                  onChange={(e) => setFormData({...formData, targetArch: e.target.value})}
+                  disabled={building}
+                >
+                  <option value="amd64">x86_64 (64-bit)</option>
+                  <option value="386">x86 (32-bit)</option>
+                  <option value="arm64">ARM64</option>
+                  <option value="arm">ARM (32-bit)</option>
+                </select>
+                <small>CPU architecture of target</small>
+              </div>
+            </div>
+            
+            <div className="action-section">
+              <button 
+                onClick={() => {
+                  if (formData.agentId.trim()) {
+                    setActiveSection('tasks');
+                  } else {
+                    alert('Please enter an Agent ID');
+                  }
+                }}
+                className="primary-button"
+              >
+                Next: Select Tasks →
+              </button>
             </div>
           </div>
-          
-          <div className="button-row">
-            <button onClick={selectAllInCategory} disabled={building} className="secondary">
-              Select All {categoryFilter !== 'All' && `(${categoryFilter})`}
-            </button>
-            <button onClick={deselectAll} disabled={building} className="secondary">
-              Deselect All
-            </button>
-          </div>
-          
-          <div className="tasks-grid">
-            {filteredTasks.map(task => (
-              <div 
-                key={task.id} 
-                className={`task-card ${formData.selectedTasks.includes(task.id) ? 'selected' : ''}`}
-                onClick={() => !building && toggleTask(task.id)}
-              >
-                <div className="task-header">
-                  <input
-                    type="checkbox"
-                    checked={formData.selectedTasks.includes(task.id)}
-                    onChange={() => toggleTask(task.id)}
+        )}
+        
+        {/* Task Selection Section */}
+        {activeSection === 'tasks' && (
+          <div className="form-section">
+            <h3>Select Tasks ({formData.selectedTasks.length} selected)</h3>
+            
+            <div className="section-header">
+              <div className="button-group">
+                {CATEGORIES.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setCategoryFilter(cat)}
+                    className={categoryFilter === cat ? 'active' : ''}
                     disabled={building}
-                  />
-                  <div>
-                    <strong>{task.name}</strong>
-                    <span className="task-category">{task.category}</span>
-                  </div>
-                </div>
-                <p className="task-description">{task.description}</p>
-                {task.params && (
-                  <div className="task-params">
-                    {Object.entries(task.params).map(([key, val]) => (
-                      <small key={key}>{key}: {val}</small>
-                    ))}
-                  </div>
-                )}
+                  >
+                    {cat}
+                  </button>
+                ))}
               </div>
-            ))}
+            </div>
+            
+            <div className="button-row">
+              <button onClick={selectAllInCategory} disabled={building} className="secondary">
+                Select All {categoryFilter !== 'All' && `(${categoryFilter})`}
+              </button>
+              <button onClick={deselectAll} disabled={building} className="secondary">
+                Deselect All
+              </button>
+            </div>
+            
+            <div className="tasks-grid">
+              {filteredTasks.map(task => (
+                <div 
+                  key={task.id} 
+                  className={`task-card ${formData.selectedTasks.includes(task.id) ? 'selected' : ''}`}
+                  onClick={() => !building && toggleTask(task.id)}
+                >
+                  <div className="task-header">
+                    <input
+                      type="checkbox"
+                      checked={formData.selectedTasks.includes(task.id)}
+                      onChange={() => toggleTask(task.id)}
+                      disabled={building}
+                    />
+                    <div>
+                      <strong>{task.name}</strong>
+                      <span className="task-category">{task.category}</span>
+                    </div>
+                  </div>
+                  <p className="task-description">{task.description}</p>
+                  {task.params && (
+                    <div className="task-params">
+                      {Object.entries(task.params).map(([key, val]) => (
+                        <small key={key}>{key}: {val}</small>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            
+            <div className="action-section">
+              <button 
+                onClick={() => setActiveSection('config')}
+                className="secondary"
+              >
+                ← Back
+              </button>
+              <button 
+                onClick={() => {
+                  if (formData.selectedTasks.length === 0) {
+                    alert('Please select at least one task');
+                  } else {
+                    setActiveSection('build');
+                  }
+                }}
+                className="primary-button"
+              >
+                Next: Build Agent →
+              </button>
+            </div>
           </div>
-        </div>
+        )}
         
-        <div className="action-section">
-          <button 
-            onClick={buildAgent} 
-            disabled={building || !formData.agentId || formData.selectedTasks.length === 0}
-            className="primary-button"
-          >
-            {building ? 'Building Agent...' : 'Build Agent'}
-          </button>
-        </div>
+        {/* Build Section */}
+        {activeSection === 'build' && (
+          <div className="form-section">
+            <h3>Build Summary</h3>
+            
+            <div className="build-info">
+              <div className="info-row">
+                <span>Agent ID:</span>
+                <strong>{formData.agentId}</strong>
+              </div>
+              <div className="info-row">
+                <span>Tasks:</span>
+                <strong>{formData.selectedTasks.length} selected</strong>
+              </div>
+              <div className="info-row">
+                <span>Beacon Interval:</span>
+                <strong>{formData.beaconInterval}s</strong>
+              </div>
+              <div className="info-row">
+                <span>C2 Server:</span>
+                <strong>{formData.c2Server}</strong>
+              </div>
+              <div className="info-row">
+                <span>Target Platform:</span>
+                <strong>{formData.targetOS}/{formData.targetArch}</strong>
+              </div>
+            </div>
+            
+            <div className="action-section">
+              <button 
+                onClick={() => setActiveSection('tasks')}
+                className="secondary"
+              >
+                ← Back
+              </button>
+              <button 
+                onClick={buildAgent} 
+                disabled={building}
+                className="primary-button"
+              >
+                {building ? 'Building Agent...' : 'Start Build'}
+              </button>
+            </div>
+          </div>
+        )}
         
-        {downloadUrl && (
+        {/* Download Section */}
+        {activeSection === 'download' && downloadUrl && (
           <div className="download-section">
             <h3>✓ Agent Built Successfully!</h3>
             
@@ -423,8 +539,22 @@ export default function BuildAgent() {
                 configuration is needed. Tasks will execute automatically on startup.
               </div>
             </div>
+            
+            <div className="action-section">
+              <button 
+                onClick={() => {
+                  setActiveSection('build');
+                  setDownloadUrl(null);
+                  setBuildInfo(null);
+                }}
+                className="secondary"
+              >
+                Build Another Agent
+              </button>
+            </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

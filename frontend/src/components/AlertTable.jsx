@@ -160,9 +160,9 @@ export default function AlertTable() {
   }
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {/* EDR Filter Dropdown */}
-      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
         <label style={{ color: '#8b949e', fontWeight: '600', fontSize: '0.9rem' }}>
           Filter by EDR:
         </label>
@@ -192,30 +192,30 @@ export default function AlertTable() {
         )}
       </div>
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div className="alert-table-container">
+        <table className="alert-table">
           <thead>
-            <tr style={{ borderBottom: '2px solid #30363d' }}>
-              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Timestamp</th>
-              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>EDR</th>
-              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Agent</th>
-              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Severity</th>
-              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Description</th>
-              <th style={{ textAlign: 'left', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>MITRE ATT&CK</th>
-              <th style={{ textAlign: 'center', padding: '0.8rem', color: '#8b949e', fontWeight: '600' }}>Mitigation</th>
+            <tr>
+              <th>Timestamp</th>
+              <th>EDR</th>
+              <th>Agent</th>
+              <th>Severity</th>
+              <th>Description</th>
+              <th>MITRE ATT&CK</th>
+              <th>Mitigation</th>
             </tr>
           </thead>
-        <tbody>
-          {alerts.length === 0 ? (
-            <tr>
-              <td colSpan="7" style={{ padding: '2rem', textAlign: 'center', color: '#8b949e' }}>
-                No alerts found. System is clean or EDR is still initializing.
-              </td>
-            </tr>
-          ) : (
-            alerts.map((alert, idx) => <AlertRow key={idx} alert={alert} />)
-          )}
-        </tbody>
+          <tbody>
+            {alerts.length === 0 ? (
+              <tr>
+                <td colSpan="7" style={{ padding: '2rem', textAlign: 'center', color: '#8b949e' }}>
+                  No alerts found. System is clean or EDR is still initializing.
+                </td>
+              </tr>
+            ) : (
+              alerts.map((alert, idx) => <AlertRow key={idx} alert={alert} />)
+            )}
+          </tbody>
         </table>
       </div>
     </div>

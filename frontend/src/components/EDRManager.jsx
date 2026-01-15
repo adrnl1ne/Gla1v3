@@ -70,15 +70,23 @@ export default function EDRManager() {
     if (!confirm('Are you sure you want to delete this EDR configuration?')) return;
     
     try {
+      const token = localStorage.getItem('gla1v3_token');
       const res = await fetch(`https://api.gla1v3.local/api/edr-configs/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       });
       
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      fetchEDRs();
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      }
+      await fetchEDRs();
     } catch (err) {
       console.error('Failed to delete EDR config:', err);
-      alert(`Error: ${err.message}`);
+      alert(`Error deleting config: ${err.message}`);
     }
   };
 
