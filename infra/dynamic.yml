@@ -4,35 +4,28 @@ tls:
       defaultCertificate:
         certFile: /etc/traefik/certs/server.crt
         keyFile: /etc/traefik/certs/server.key
+  
   certificates:
-    - certFile: /etc/traefik/certs/c2.gla1v3.local.crt
-      keyFile: /etc/traefik/certs/c2.gla1v3.local.key
-      stores:
-        - default
     - certFile: /etc/traefik/certs/server.crt
       keyFile: /etc/traefik/certs/server.key
-      stores:
-        - default
+    - certFile: /etc/traefik/certs/c2.gla1v3.local.crt
+      keyFile: /etc/traefik/certs/c2.gla1v3.local.key
+  
   options:
-    default: {}
-    mtls-required:
+    default:
+      minVersion: VersionTLS12
+    mtls:
+      minVersion: VersionTLS12
       clientAuth:
         caFiles:
-          - /etc/traefik/certs/ca.crt
+          - /ca-certs/ca-cert.pem
         clientAuthType: RequireAndVerifyClientCert
 
-tcp:
-  routers:
-    c2:
-      entryPoints:
-        - c2
-      rule: "HostSNI(`c2.gla1v3.local`)"
-      service: c2
-      tls:
-        passthrough: true
-        options: mtls-required
-  services:
-    c2:
-      loadBalancer:
-        servers:
-          - address: backend:3001
+http:
+  middlewares:
+    pass-client-cert:
+      passTLSClientCert:
+        pem: true
+        info:
+          subject:
+            commonName: true

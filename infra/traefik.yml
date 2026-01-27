@@ -1,25 +1,24 @@
-# traefik.yml – Static config for v2.10 (unchanged from yours, just added comments)
 log:
-  level: DEBUG
+  level: INFO
 
 entryPoints:
   websecure:
-    address: ":443"  # Normal HTTPS traffic
-  c2:
-    address: ":4443"  # mTLS for agents (Gla1v3-specific)
+    address: ":443"
     forwardedHeaders:
       insecure: true
+  c2:
+    address: ":4443"
+    forwardedHeaders:
+      insecure: true
+    transport:
+      respondingTimeouts:
+        readTimeout: 30s
 
 providers:
   docker:
-    exposedByDefault: false  # Only enabled services get routes
+    exposedByDefault: false
   file:
-    filename: /etc/traefik/dynamic.yml  # Dynamic mTLS + certs
+    filename: /etc/traefik/dynamic.yml
 
 api:
   dashboard: true
-  insecure: true  # Dev only – access at http://traefik.gla1v3.local:8080/dashboard/
-
-customRequestHeaders:
-  ssl-client-cert: "%[req.ssl_client_cert]"
-  x-forwarded-tls-client-cert: "%[req.ssl_client_cert]"

@@ -1,0 +1,53 @@
+# Wazuh EDR - All-in-One Official Image
+# Uses official Wazuh 4.8.2 manager container with OpenSearch for storage
+
+services:
+  wazuh:
+    image: wazuh/wazuh-manager:4.8.2
+    container_name: wazuh-edr
+    hostname: wazuh-edr
+    restart: unless-stopped
+    ports:
+      - "1514:1514"   # Agent communication (TCP)
+      - "1515:1515"   # Agent enrollment (TCP)
+      - "55001:55000" # Wazuh API (remapped to avoid port conflict)
+    environment:
+      - FILEBEAT_SSL_VERIFICATION_MODE=none
+      - WAZUH_API_USER=wazuh
+      - WAZUH_API_PASSWORD=wazuh
+    volumes:
+      - wazuh-etc:/var/ossec/etc
+      - wazuh-logs:/var/ossec/logs
+      - wazuh-data:/var/ossec/data
+    depends_on:
+      - opensearch
+    networks:
+      - wazuh-net
+
+  opensearch:
+    image: opensearchproject/opensearch:2.11.1
+    container_name: opensearch
+    environment:
+      - cluster.name=wazuh-cluster
+      - node.name=opensearch-node
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    networks:
+      - wazuh-net
+
+networks:
+  wazuh-net:
+    name: infra_wazuh-net
+    external: true
+
+volumes:
+  wazuh-etc:
+  wazuh-logs:
+  wazuh-data:
+  opensearch-data:

@@ -1,3 +1,7 @@
 node_modules/
 certs/
 .env
+
+# VM ISOs and large files
+vm-templates/images/*.iso
+*.iso
