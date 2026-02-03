@@ -15,12 +15,16 @@ CLIENT_CSR=manager-client.csr
 CLIENT_CERT=manager-client.crt
 
 # Create CA
-if [ ! -f "$CA_KEY" ] || [ ! -f "$CA_CERT" ]; then
-  echo "Generating repo CA..."
+if [ ! -f "$CA_KEY" ]; then
+  echo "Generating CA key..."
   openssl genrsa -out "$CA_KEY" 4096
+fi
+if [ ! -f "$CA_CERT" ]; then
+  echo "Generating CA certificate..."
   openssl req -x509 -new -nodes -key "$CA_KEY" -sha256 -days 3650 -subj "/CN=gla1v3-repo-ca" -out "$CA_CERT"
-else
-  echo "CA already exists, skipping generation."
+fi
+if [ -f "$CA_KEY" ] && [ -f "$CA_CERT" ]; then
+  echo "CA ready (key + cert exist)"
 fi
 
 # Server cert for demo.indexer

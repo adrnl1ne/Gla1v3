@@ -13,7 +13,7 @@ services:
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
       - ./dynamic.yml:/etc/traefik/dynamic.yml:ro
     environment:
-      - GLA1V3_DOMAIN=gla1v3.local
+      - GLA1V3_DOMAIN=${GLA1V3_DOMAIN}
     networks:
       - gla1v3-net
     depends_on:
@@ -24,14 +24,17 @@ services:
     container_name: backend
     restart: unless-stopped
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=${NODE_ENV:-production}
+      - ALLOW_INSECURE_DEFAULTS=${ALLOW_INSECURE_DEFAULTS:-false}
       - GLA1V3_DOMAIN=${GLA1V3_DOMAIN}
-      - AGENT_WHOAMI_TOKEN=3f7b9a2d8c1e4f5a6b7c8d9e0f1a2b3c
+      - AGENT_WHOAMI_TOKEN=${AGENT_WHOAMI_TOKEN}
       - OPENSEARCH_URL=${OPENSEARCH_URL}
       - OPENSEARCH_AUTH_METHOD=${OPENSEARCH_AUTH_METHOD}
-      - JWT_SECRET=CHANGEME_SECURE_SECRET_KEY_HERE
-      - ADMIN_PASSWORD=admin
-      - INTERNAL_TOKEN=CHANGEME_INTERNAL_TOKEN
+      - OPENSEARCH_USER=${OPENSEARCH_USER:-}
+      - OPENSEARCH_PASS=${OPENSEARCH_PASS:-}
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - INTERNAL_TOKEN=${INTERNAL_TOKEN}
     volumes:
       - ../certs:/app/certs:ro
       - ../agents-go:/agents-go:ro
@@ -42,7 +45,7 @@ services:
       - ca-service
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=gla1v3-net"
+      - "traefik.docker.network=infra_gla1v3-net"
       - "traefik.http.routers.backend-api.rule=Host(`api.gla1v3.local`)"
       - "traefik.http.routers.backend-api.entrypoints=websecure"
       - "traefik.http.routers.backend-api.tls=true"
@@ -81,7 +84,7 @@ services:
     container_name: ca-service
     restart: unless-stopped
     environment:
-      - CERT_DIR=/certs
+      - CERT_DIR=${CERT_DIR:-/certs}
     volumes:
       - ca-certs:/certs
     labels:

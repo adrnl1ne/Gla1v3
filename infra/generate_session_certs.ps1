@@ -1,9 +1,9 @@
 # PowerShell version of certificate generation script
 $ErrorActionPreference = "Stop"
 
-# Use WSL's openssl if native openssl is not available
+# Use native Windows openssl directly
 function Invoke-OpenSSL {
-    wsl openssl @args
+    openssl @args
 }
 
 $OUT_DIR = Join-Path (Split-Path $PSScriptRoot -Parent) "certs"
@@ -20,12 +20,16 @@ $CLIENT_CSR = "manager-client.csr"
 $CLIENT_CERT = "manager-client.crt"
 
 # Create CA
-if (!(Test-Path $CA_KEY) -or !(Test-Path $CA_CERT)) {
-    Write-Host "Generating repo CA..."
+if (!(Test-Path $CA_KEY)) {
+    Write-Host "Generating CA key..."
     Invoke-OpenSSL genrsa -out $CA_KEY 4096
+}
+if (!(Test-Path $CA_CERT)) {
+    Write-Host "Generating CA certificate..."
     Invoke-OpenSSL req -x509 -new -nodes -key $CA_KEY -sha256 -days 3650 -subj "/CN=gla1v3-repo-ca" -out $CA_CERT
-} else {
-    Write-Host "CA already exists, skipping generation."
+}
+if ((Test-Path $CA_KEY) -and (Test-Path $CA_CERT)) {
+    Write-Host "CA ready (key + cert exist)"
 }
 
 # Server cert for demo.indexer

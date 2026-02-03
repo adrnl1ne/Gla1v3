@@ -20,18 +20,28 @@ Gla1v3 combines offensive agent orchestration (inspired by Caldera) with defensi
 ```bash
 # Clone the repository
 git clone https://github.com/adrnl1ne/Gla1v3.git
-cd Gla1v3
+cd Gla1v3/infra
 
-# Start the platform
-cd infra
-docker compose up -d
-
-# Add to hosts file (Windows: C:\Windows\System32\drivers\etc\hosts)
-127.0.0.1 gla1v3.local dashboard.gla1v3.local api.gla1v3.local c2.gla1v3.local wazuh.gla1v3.local
+# Start the platform (generates certificates automatically)
+./start.ps1  # Windows
+# OR
+./start.sh   # Linux/Mac
 
 # Access dashboard
 https://dashboard.gla1v3.local
+# Default credentials: admin / admin123
 ```
+
+**Note**: Accessing via domain names requires DNS configuration or hosts file entry:
+```
+127.0.0.1 gla1v3.local dashboard.gla1v3.local api.gla1v3.local c2.gla1v3.local ca.gla1v3.local
+```
+
+⚠️ **SECURITY NOTE**: 
+- The `generate-secrets` script creates strong random passwords
+- Admin credentials are displayed after generation
+- Change the admin password after first login
+- Never commit `.env` to git (it's in `.gitignore`)
 
 ## Architecture
 
@@ -111,12 +121,31 @@ go run cmd/agent/main.go
 
 ## Security
 
-⚠️ **Note**: This is a purple teaming platform for authorized testing only. Current implementation uses self-signed certificates and disabled cert verification for MVP. Production deployment requires:
+⚠️ **Note**: This is a purple teaming platform for authorized testing only.
 
-- Proper certificate management
-- Session-based cert generation
-- Full TLS verification
-- JWT authentication
+### Security Hardening Implemented
+
+- ✅ **No Hardcoded Credentials** - All secrets via environment variables
+- ✅ **Automatic Secret Generation** - Cryptographically secure random secrets
+- ✅ **Strict Validation** - Backend fails fast on missing/weak secrets
+- ✅ **mTLS for Agents** - Mutual TLS for C2 communication
+- ✅ **JWT Authentication** - Session-based authentication with RBAC
+- ✅ **Session Certificates** - Dynamic cert generation with auto-expiration
+
+### Production Deployment Requirements
+
+For production use, ensure:
+
+- ✅ Run `generate-secrets` script before deployment
+- ✅ Use proper TLS certificates (not self-signed)
+- ✅ Change admin password immediately after first login
+- ✅ Enable network segmentation (firewall rules)
+- ✅ Regular security audits and updates
+- 🔄 Consider HashiCorp Vault or similar for secret management
+- 🔄 Implement certificate rotation policies
+- 🔄 Enable comprehensive audit logging
+
+See [docs/SECURITY.md](docs/SECURITY.md) for detailed security architecture.
 - Network segmentation
 
 ## License
