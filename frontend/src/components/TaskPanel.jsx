@@ -1,10 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { TaskModal } from './modals';
 
 export default function TaskPanel({ agent, onClose }) {
   const [cmd, setCmd] = useState('');
   const [args, setArgs] = useState('');
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [showTaskModal, setShowTaskModal] = useState(false);
+
+  useEffect(() => {
+    fetchTasks();
+    const interval = setInterval(fetchTasks, 5000); // Auto-refresh every 5s
+    return () => clearInterval(interval);
+  }, [agent.id]);
 
   const fetchTasks = async () => {
     try {
@@ -40,14 +48,53 @@ export default function TaskPanel({ agent, onClose }) {
     }
   };
 
+  const sendEmbeddedTask = async (task) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`https://api.gla1v3.local/api/agents/${agent.id}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'embedded',
+          taskType: task.type,
+          params: task.params,
+          runOnce: task.runOnce || false
+        })
+      });
+      
+      if (res.ok) {
+        fetchTasks();
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Failed to send embedded task:', err);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const quickCommands = [
-    { label: 'whoami', cmd: 'whoami', args: '' },
-    { label: 'hostname', cmd: 'hostname', args: '' },
-    { label: 'ipconfig', cmd: 'ipconfig', args: '/all' },
-    { label: 'tasklist', cmd: 'tasklist', args: '' },
-    { label: 'netstat', cmd: 'netstat', args: '-ano' },
-    { label: 'systeminfo', cmd: 'systeminfo', args: '' },
+    { label: 'whoami', cmd: 'whoami', args: '', os: 'all' },
+    { label: 'hostname', cmd: 'hostname', args: '', os: 'all' },
+    // Linux/Unix commands
+    { label: 'ps aux', cmd: 'ps', args: 'aux', os: 'linux' },
+    { label: 'uname -a', cmd: 'uname', args: '-a', os: 'linux' },
+    { label: 'netstat -tuln', cmd: 'netstat', args: '-tuln', os: 'linux' },
+    { label: 'df -h', cmd: 'df', args: '-h', os: 'linux' },
+    // Windows commands
+    { label: 'ipconfig /all', cmd: 'ipconfig', args: '/all', os: 'windows' },
+    { label: 'tasklist', cmd: 'tasklist', args: '', os: 'windows' },
+    { label: 'netstat -ano', cmd: 'netstat', args: '-ano', os: 'windows' },
+    { label: 'systeminfo', cmd: 'systeminfo', args: '', os: 'windows' },
   ];
+
+  // Filter commands based on agent OS
+  const agentOS = agent.os?.toLowerCase() || 'linux';
+  const filteredCommands = quickCommands.filter(cmd => 
+    cmd.os === 'all' || agentOS.includes(cmd.os)
+  );
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
@@ -64,8 +111,40 @@ export default function TaskPanel({ agent, onClose }) {
         <div style={{ flex: 1, display: 'flex', gap: '1rem', padding: '1rem', overflow: 'hidden' }}>
           {/* Command Panel */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {/* Task Builder Button */}
+            <button
+              onClick={() => setShowTaskModal(true)}
+              style={{
+                background: 'linear-gradient(135deg, #6e40c9 0%, #8957e5 100%)',
+                border: 'none',
+                color: '#fff',
+                padding: '16px 24px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontWeight: '700',
+                fontSize: '1.1rem',
+                boxShadow: '0 4px 16px rgba(110, 64, 201, 0.4)',
+                transition: 'all 0.3s',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.75rem'
+              }}
+              onMouseEnter={e => {
+                e.target.style.transform = 'translateY(-2px)';
+                e.target.style.boxShadow = '0 6px 20px rgba(110, 64, 201, 0.6)';
+              }}
+              onMouseLeave={e => {
+                e.target.style.transform = 'none';
+                e.target.style.boxShadow = '0 4px 16px rgba(110, 64, 201, 0.4)';
+              }}
+            >
+              <span style={{ fontSize: '1.5rem' }}>🎯</span>
+              Open Task Builder
+            </button>
+
             <div style={{ background: '#161b22', borderRadius: 8, padding: '1rem', border: '1px solid #30363d' }}>
-              <h3 style={{ margin: '0 0 1rem 0', color: '#58a6ff', fontSize: '1rem' }}>Send Command</h3>
+              <h3 style={{ margin: '0 0 1rem 0', color: '#58a6ff', fontSize: '1rem' }}>Quick Command (Legacy)</h3>
               
               <div style={{ marginBottom: '1rem' }}>
                 <label style={{ display: 'block', color: '#8b949e', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Command</label>
@@ -109,9 +188,9 @@ export default function TaskPanel({ agent, onClose }) {
               </button>
 
               <div style={{ marginTop: '1rem' }}>
-                <div style={{ color: '#8b949e', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Quick Commands:</div>
+                <div style={{ color: '#8b949e', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Quick Commands ({agentOS}):</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  {quickCommands.map(qc => (
+                  {filteredCommands.map(qc => (
                     <button
                       key={qc.label}
                       onClick={() => { setCmd(qc.cmd); setArgs(qc.args); }}
@@ -194,6 +273,20 @@ export default function TaskPanel({ agent, onClose }) {
           </div>
         </div>
       </div>
+
+      {/* Task Modal */}
+      {showTaskModal && (
+        <TaskModal
+          agent={agent}
+          onClose={() => setShowTaskModal(false)}
+          onSubmit={async (task) => {
+            const success = await sendEmbeddedTask(task);
+            if (success) {
+              setShowTaskModal(false);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -9,12 +9,23 @@ class TaskModel {
     const task = {
       id: crypto.randomBytes(8).toString('hex'),
       agentId,
-      cmd: taskData.cmd,
-      args: taskData.args || [],
       status: 'pending',
       createdAt: new Date().toISOString(),
       result: null
     };
+    
+    // Handle embedded task format
+    if (taskData.type === 'embedded' || taskData.taskType) {
+      task.type = 'embedded';
+      task.taskType = taskData.taskType;
+      task.params = taskData.params || {};
+      task.runOnce = taskData.runOnce || false;
+    }
+    // Handle command task format
+    else {
+      task.cmd = taskData.cmd;
+      task.args = taskData.args || [];
+    }
     
     if (!taskQueue.has(agentId)) {
       taskQueue.set(agentId, []);

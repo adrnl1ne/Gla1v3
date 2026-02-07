@@ -90,8 +90,8 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api', edrRoutes); // /api/alerts/*, /api/edr-configs/*
 app.use('/api/build', buildRoutes);
 
-// C2 Routes (mTLS)
-c2app.post('/beacon', agentRoutes);
+// C2 Routes (mTLS) - Mount agent beacon route
+c2app.use('/', agentRoutes);
 
 // Start servers
 const PORT = 3000;
@@ -103,22 +103,9 @@ app.listen(PORT, () => {
   console.log(`   Domain: ${config.domain}`);
 });
 
-// C2 Server with mTLS
-try {
-  const tlsOptions = {
-    key: fs.readFileSync(path.join(__dirname, 'certs/server.key')),
-    cert: fs.readFileSync(path.join(__dirname, 'certs/server.crt')),
-    ca: [fs.readFileSync(path.join(__dirname, 'certs/ca.crt'))],
-    requestCert: true,
-    rejectUnauthorized: false
-  };
-  
-  https.createServer(tlsOptions, c2app).listen(C2_PORT, () => {
-    console.log(`✅ C2 mTLS server running on port ${C2_PORT}`);
-  });
-} catch (err) {
-  console.warn(`⚠️  C2 server not started (certificates not found): ${err.message}`);
-  console.warn('   Run: cd infra && ./generate_session_certs.ps1');
-}
+// C2 Server (plain HTTP - Traefik handles mTLS termination)
+c2app.listen(C2_PORT, () => {
+  console.log(`✅ C2 server running on port ${C2_PORT} (Traefik handles mTLS)`);
+});
 
 module.exports = { app, c2app };

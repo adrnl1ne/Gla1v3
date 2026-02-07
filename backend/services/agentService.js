@@ -11,6 +11,7 @@ class AgentService {
     if (!agent) {
       agent = AgentModel.register({
         id: agentId,
+        cn: agentData.cn || this.extractCNFromCert(clientCert),
         hostname: agentData.hostname,
         os: agentData.os,
         arch: agentData.arch,
@@ -19,6 +20,7 @@ class AgentService {
       });
     } else {
       AgentModel.update(agentId, {
+        cn: agentData.cn || agent.cn || this.extractCNFromCert(clientCert),
         hostname: agentData.hostname,
         os: agentData.os,
         arch: agentData.arch,

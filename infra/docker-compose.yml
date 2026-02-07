@@ -38,6 +38,7 @@ services:
     volumes:
       - ../certs:/app/certs:ro
       - ../agents-go:/agents-go:ro
+      - agent-builds:/app/builds
       - wazuh-logs:/var/ossec/logs:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -98,6 +99,8 @@ services:
 
 volumes:
   ca-certs:
+    driver: local
+  agent-builds:
     driver: local
   wazuh-logs:
     name: wazuh_wazuh-logs

@@ -1,71 +1,43 @@
 import { useState } from 'react';
 import '../styles/global.css';
+import { BuildTaskModal } from './modals';
+import { getAllTasks } from './modals/TaskModal/TaskTemplates';
 
-const AVAILABLE_TASKS = [
-  {
-    id: 'sys_info',
-    name: 'System Information',
-    description: 'Collect hostname, OS, kernel version, and user information',
-    type: 'sys_info',
-    runOnce: true,
-    category: 'Recon'
-  },
-  {
-    id: 'priv_check',
-    name: 'Privilege Check',
-    description: 'Check if running as root/admin and sudo access',
-    type: 'priv_check',
-    runOnce: true,
-    category: 'Recon'
-  },
-  {
-    id: 'network_scan',
-    name: 'Network Scan',
-    description: 'Scan local subnet for active hosts (placeholder)',
-    type: 'network_scan',
-    params: { subnet: '192.168.0.0/24' },
-    runOnce: true,
-    category: 'Network'
-  },
-  {
-    id: 'file_search_ssh',
-    name: 'Search SSH Keys',
-    description: 'Search for SSH private keys',
-    type: 'file_search',
-    params: { path: '/home', pattern: '*.key' },
-    runOnce: true,
-    category: 'Files'
-  },
-  {
-    id: 'whoami_cmd',
-    name: 'Execute whoami',
-    description: 'Run whoami command to get current user',
-    type: 'cmd',
-    params: { command: 'whoami' },
-    runOnce: true,
-    category: 'Commands'
-  },
-  {
-    id: 'ifconfig_cmd',
-    name: 'Network Interfaces',
-    description: 'List network interfaces and IP addresses',
-    type: 'cmd',
-    params: { command: 'ip addr show || ifconfig' },
-    runOnce: true,
-    category: 'Commands'
-  },
-  {
-    id: 'ps_cmd',
-    name: 'Process List',
-    description: 'List running processes',
-    type: 'cmd',
-    params: { command: 'ps aux' },
-    runOnce: true,
-    category: 'Commands'
-  }
-];
+// Convert task templates to AVAILABLE_TASKS format for BuildAgent
+const createAvailableTasks = () => {
+  const allTasks = getAllTasks();
+  const categories = {
+    sys_info: 'Recon',
+    priv_check: 'Recon',
+    cmd: 'Commands',
+    file_list: 'Files',
+    file_search: 'Files',
+    file_read: 'Files',
+    file_download: 'Files',
+    file_write: 'Files',
+    file_delete: 'Files',
+    proc_list: 'Processes',
+    proc_kill: 'Processes',
+    proc_kill_name: 'Processes',
+    proc_start: 'Processes',
+    proc_info: 'Processes'
+  };
 
-const CATEGORIES = ['All', 'Recon', 'Network', 'Files', 'Commands'];
+  return allTasks.map(task => ({
+    id: task.id,
+    name: task.label,
+    description: task.description,
+    type: task.id,
+    icon: task.icon,
+    needsConfig: task.needsConfig || false,
+    runOnce: true,
+    category: categories[task.id] || 'Other',
+    params: {} // Will be configured via modal if needsConfig is true
+  }));
+};
+
+const AVAILABLE_TASKS = createAvailableTasks();
+const CATEGORIES = ['All', 'Recon', 'Files', 'Processes', 'Commands'];
 
 export default function BuildAgent() {
   const [formData, setFormData] = useState({
@@ -84,14 +56,49 @@ export default function BuildAgent() {
   const [buildInfo, setBuildInfo] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [activeSection, setActiveSection] = useState('config');
+  const [configModalTaskId, setConfigModalTaskId] = useState(null);
+  const [configuredTasks, setConfiguredTasks] = useState({}); // Store task configurations
   
   const toggleTask = (taskId) => {
+    const task = AVAILABLE_TASKS.find(t => t.id === taskId);
+    
+    // If task needs configuration and is being added, show modal
+    if (task && task.needsConfig && !formData.selectedTasks.includes(taskId)) {
+      setConfigModalTaskId(taskId);
+      return;
+    }
+    
+    // Otherwise just toggle selection
     setFormData(prev => ({
       ...prev,
       selectedTasks: prev.selectedTasks.includes(taskId)
         ? prev.selectedTasks.filter(id => id !== taskId)
         : [...prev.selectedTasks, taskId]
     }));
+    
+    // Remove configuration if deselecting
+    if (formData.selectedTasks.includes(taskId)) {
+      const newConfigured = { ...configuredTasks };
+      delete newConfigured[taskId];
+      setConfiguredTasks(newConfigured);
+    }
+  };
+  
+  const handleTaskConfigured = (taskData) => {
+    // Save task configuration
+    setConfiguredTasks(prev => ({
+      ...prev,
+      [taskData.id]: taskData
+    }));
+    
+    // Add to selected tasks
+    setFormData(prev => ({
+      ...prev,
+      selectedTasks: [...prev.selectedTasks, taskData.id]
+    }));
+    
+    // Close modal
+    setConfigModalTaskId(null);
   };
   
   const selectAllInCategory = () => {
@@ -165,12 +172,16 @@ export default function BuildAgent() {
     
     const tasks = AVAILABLE_TASKS
       .filter(t => formData.selectedTasks.includes(t.id))
-      .map(({ id, type, params, runOnce }) => ({
-        id, 
-        type, 
-        params: params || {}, 
-        runOnce: runOnce !== false
-      }));
+      .map(({ id, type, params, runOnce }) => {
+        // Use configured params if available, otherwise use default params
+        const taskParams = configuredTasks[id]?.params || params || {};
+        return {
+          id, 
+          type, 
+          params: taskParams, 
+          runOnce: runOnce !== false
+        };
+      });
     
     try {
       const token = localStorage.getItem('gla1v3_token');
@@ -382,34 +393,66 @@ export default function BuildAgent() {
             </div>
             
             <div className="tasks-grid">
-              {filteredTasks.map(task => (
-                <div 
-                  key={task.id} 
-                  className={`task-card ${formData.selectedTasks.includes(task.id) ? 'selected' : ''}`}
-                  onClick={() => !building && toggleTask(task.id)}
-                >
-                  <div className="task-header">
-                    <input
-                      type="checkbox"
-                      checked={formData.selectedTasks.includes(task.id)}
-                      onChange={() => toggleTask(task.id)}
-                      disabled={building}
-                    />
-                    <div>
-                      <strong>{task.name}</strong>
-                      <span className="task-category">{task.category}</span>
+              {filteredTasks.map(task => {
+                const isSelected = formData.selectedTasks.includes(task.id);
+                const isConfigured = configuredTasks[task.id];
+                
+                return (
+                  <div 
+                    key={task.id} 
+                    className={`task-card ${isSelected ? 'selected' : ''}`}
+                    onClick={() => !building && toggleTask(task.id)}
+                  >
+                    <div className="task-header">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleTask(task.id)}
+                        disabled={building}
+                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+                        <span style={{ fontSize: '1.5rem' }}>{task.icon}</span>
+                        <div style={{ flex: 1 }}>
+                          <strong>{task.name}</strong>
+                          <span className="task-category">{task.category}</span>
+                        </div>
+                        {task.needsConfig && isSelected && isConfigured && (
+                          <span style={{ 
+                            background: '#238636', 
+                            color: '#fff', 
+                            padding: '2px 8px', 
+                            borderRadius: 4, 
+                            fontSize: '0.75rem',
+                            fontWeight: '600'
+                          }}>
+                            ✓ Configured
+                          </span>
+                        )}
+                        {task.needsConfig && !isSelected && (
+                          <span style={{ 
+                            background: 'rgba(88, 166, 255, 0.2)', 
+                            color: '#58a6ff', 
+                            padding: '2px 8px', 
+                            borderRadius: 4, 
+                            fontSize: '0.75rem',
+                            fontWeight: '600'
+                          }}>
+                            ⚙️ Config Required
+                          </span>
+                        )}
+                      </div>
                     </div>
+                    <p className="task-description">{task.description}</p>
+                    {isConfigured && configuredTasks[task.id].params && (
+                      <div className="task-params">
+                        {Object.entries(configuredTasks[task.id].params).map(([key, val]) => (
+                          <small key={key}>{key}: {String(val).substring(0, 50)}{String(val).length > 50 ? '...' : ''}</small>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <p className="task-description">{task.description}</p>
-                  {task.params && (
-                    <div className="task-params">
-                      {Object.entries(task.params).map(([key, val]) => (
-                        <small key={key}>{key}: {val}</small>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
             
             <div className="action-section">
@@ -554,8 +597,18 @@ export default function BuildAgent() {
             </div>
           </div>
         )}
+        
         </div>
       </div>
+      
+      {/* Task Configuration Modal */}
+      {configModalTaskId && (
+        <BuildTaskModal
+          taskId={configModalTaskId}
+          onClose={() => setConfigModalTaskId(null)}
+          onSave={handleTaskConfigured}
+        />
+      )}
     </div>
   );
 }

