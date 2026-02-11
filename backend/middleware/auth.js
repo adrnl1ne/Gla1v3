@@ -1,10 +1,10 @@
 // Authentication and Authorization Middleware
 const jwt = require('jsonwebtoken');
 const { config } = require('../config/env');
-const { setCurrentUser } = require('../db/connection');
+const { requestContext, pool } = require('../db/connection');
 const SessionService = require('../services/sessionService');
 
-// JWT Authentication
+// JWT Authentication with RLS Context using AsyncLocalStorage
 async function authenticateJWT(req, res, next) {
   const authHeader = req.headers.authorization;
   
@@ -24,13 +24,26 @@ async function authenticateJWT(req, res, next) {
       return res.status(403).json({ error: 'Session expired' });
     }
     
-    // Set current user context for Row-Level Security
+    // Get a dedicated database client for this request  
+    const client = await pool.connect();
+    
+    // Set RLS context on this connection
     try {
-      await setCurrentUser(decoded.userId);
+      await client.query("SELECT set_config('app.current_user_id', $1, false)", [decoded.userId]);
     } catch (err) {
       console.error('[AUTH] Failed to set RLS context:', err.message);
-      // Continue anyway - RLS context failure shouldn't block the request
+      client.release();
+      return res.status(500).json({ error: 'Failed to initialize security context' });
     }
+    
+    // Store client in AsyncLocalStorage for this request
+    // All database queries in this request will automatically use this client
+    requestContext.enterWith(client);
+    
+    // Release the client when the response finishes
+    res.on('finish', () => {
+      client.release();
+    });
     
     next();
   } catch (err) {

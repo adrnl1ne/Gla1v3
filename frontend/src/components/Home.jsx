@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
+import { useTenant } from '../context/TenantContext';
 import PurpleTeamTimeline from './PurpleTeamTimeline';
 
 // Simple Pie Chart Component
-function PieChart({ data, title, colors }) {
+function PieChart({ data, title }) {
+  console.log(`[PieChart] ${title}:`, data);
   const total = data.reduce((sum, item) => sum + item.value, 0);
   
   // Handle empty data case
@@ -43,7 +45,7 @@ function PieChart({ data, title, colors }) {
                 <div style={{
                   width: 16,
                   height: 16,
-                  background: colors[idx % colors.length],
+                  background: '#888888',
                   borderRadius: 4,
                   marginRight: '0.75rem'
                 }} />
@@ -69,6 +71,16 @@ function PieChart({ data, title, colors }) {
     const startAngle = currentAngle;
     currentAngle += angle;
 
+    // For single item or full circle, draw complete circle
+    if (data.length === 1 || angle >= 359) {
+      return {
+        ...item,
+        path: `M 50 5 A 45 45 0 1 1 49.99 5 Z`,
+        color: item.color || '#888888',
+        percentage: percentage.toFixed(1)
+      };
+    }
+
     // Calculate path for pie slice
     const startX = 50 + 45 * Math.cos((Math.PI / 180) * (startAngle - 90));
     const startY = 50 + 45 * Math.sin((Math.PI / 180) * (startAngle - 90));
@@ -79,7 +91,7 @@ function PieChart({ data, title, colors }) {
     return {
       ...item,
       path: `M 50 50 L ${startX} ${startY} A 45 45 0 ${largeArc} 1 ${endX} ${endY} Z`,
-      color: colors[index % colors.length],
+      color: item.color || '#888888',
       percentage: percentage.toFixed(1)
     };
   });
@@ -89,7 +101,8 @@ function PieChart({ data, title, colors }) {
       background: '#161b22',
       border: '1px solid #30363d',
       borderRadius: 12,
-      padding: '1.5rem',      overflow: 'hidden'
+      padding: '1.5rem',
+      overflow: 'hidden'
     }}>
       <h3 style={{
         margin: '0 0 1.5rem 0',
@@ -148,7 +161,8 @@ function PieChart({ data, title, colors }) {
   );
 }
 
-export default function Home({ token, user }) {
+function Home({ token, user }) {
+  const { activeTenant } = useTenant();
   const [stats, setStats] = useState({
     agents: [],
     tasks: [],
@@ -157,28 +171,60 @@ export default function Home({ token, user }) {
   });
 
   useEffect(() => {
+    if (!activeTenant) {
+      setStats({ agents: [], tasks: [], alerts: [], loading: false });
+      return;
+    }
+    
     fetchDashboardData();
     const interval = setInterval(fetchDashboardData, 10000); // Refresh every 10s
     return () => clearInterval(interval);
-  }, [token]);
+  }, [token, activeTenant]);
 
   const fetchDashboardData = async () => {
+    if (!activeTenant) {
+      console.log('[Dashboard] No active tenant, skipping fetch');
+      return;
+    }
+    
     try {
+      const tenantId = activeTenant.id;
+      console.log('[Dashboard] Fetching data for tenant:', tenantId);
+      
       const [agentsRes, tasksRes, alertsRes] = await Promise.all([
-        fetch('https://api.gla1v3.local/api/agents', {
+        fetch(`https://api.gla1v3.local/api/agents?tenant_id=${tenantId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         }),
-        fetch('https://api.gla1v3.local/api/tasks/recent?limit=100', {
+        fetch(`https://api.gla1v3.local/api/tasks/recent?limit=100&tenant_id=${tenantId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
-        }).catch(() => ({ json: async () => [] })),
+        }).catch(err => {
+          console.warn('[Dashboard] Tasks fetch failed:', err);
+          return { json: async () => [] };
+        }),
         fetch('https://api.gla1v3.local/api/alerts/recent', {
           headers: { 'Authorization': `Bearer ${token}` }
+        }).catch(err => {
+          console.warn('[Dashboard] Alerts fetch failed:', err);
+          return { json: async () => [] };
         })
       ]);
 
+      if (!agentsRes.ok) {
+        throw new Error(`Agents fetch failed: ${agentsRes.status}`);
+      }
+
       const agents = await agentsRes.json();
-      const tasks = Array.isArray(await tasksRes.json()) ? await tasksRes.json() : [];
-      const alerts = await alertsRes.json();
+      const tasksData = await tasksRes.json();
+      const tasks = Array.isArray(tasksData) ? tasksData : [];
+      const alertsData = await alertsRes.json();
+      const alerts = Array.isArray(alertsData) ? alertsData : [];
+
+      console.log('[Dashboard] Fetched:', { 
+        agents: agents.length, 
+        tasks: tasks.length, 
+        alerts: alerts.length,
+        activeTenant: activeTenant.name 
+      });
 
       setStats({ agents, tasks, alerts, loading: false });
     } catch (err) {
@@ -198,9 +244,9 @@ export default function Home({ token, user }) {
     const evaded = stats.alerts.filter(a => a.level < 7).length;
 
     return [
-      { label: 'Detected', value: detected },
-      { label: 'Suspicious', value: suspicious },
-      { label: 'Evaded', value: evaded }
+      { label: 'Detected', value: detected, color: '#1a7f37' },
+      { label: 'Suspicious', value: suspicious, color: '#9e6a03' },
+      { label: 'Evaded', value: evaded, color: '#6e7681' }
     ].filter(item => item.value > 0);
   };
 
@@ -208,31 +254,41 @@ export default function Home({ token, user }) {
   const getAgentStats = () => {
     if (stats.agents.length === 0) {
       return [
-        { label: 'Active', value: 0 },
-        { label: 'Inactive', value: 0 }
+        { label: 'Active', value: 0, color: '#3fb950' },
+        { label: 'Inactive', value: 0, color: '#d29922' },
+        { label: 'Blacklisted', value: 0, color: '#f85149' }
       ];
     }
     const now = Date.now();
-    const active = stats.agents.filter(a => {
+    
+    // Separate blacklisted agents first
+    const blacklisted = stats.agents.filter(a => a.is_blacklisted).length;
+    const nonBlacklisted = stats.agents.filter(a => !a.is_blacklisted);
+    
+    // Among non-blacklisted, categorize as active or inactive
+    const active = nonBlacklisted.filter(a => {
       const lastSeen = new Date(a.last_seen || a.lastSeen);
       return (now - lastSeen) / 1000 < 120;
     }).length;
-    const inactive = stats.agents.filter(a => {
+    const inactive = nonBlacklisted.filter(a => {
       const lastSeen = new Date(a.last_seen || a.lastSeen);
       return (now - lastSeen) / 1000 >= 120;
     }).length;
+    
     return [
-      { label: 'Active', value: active },
-      { label: 'Inactive', value: inactive }
-    ];
+      { label: 'Active', value: active, color: '#3fb950' },
+      { label: 'Inactive', value: inactive, color: '#d29922' },
+      { label: 'Blacklisted', value: blacklisted, color: '#f85149' }
+    ].filter(item => item.value > 0);
   };
 
   // Calculate OS distribution
   const getOSStats = () => {
     if (stats.agents.length === 0) {
-      return [{ label: 'No Data', value: 0, color: '#6e7681' }];
+      return [{ label: 'No Data', value: 1, color: '#6e7681' }];
     }
     const osCounts = {};
+    const osColors = { 'Linux': '#1f6feb', 'Windows': '#da3633', 'macOS': '#8b949e', 'Other': '#9e6a03' };
     stats.agents.forEach(a => {
       const os = a.os || 'Unknown';
       const osType = os.toLowerCase().includes('windows') ? 'Windows' 
@@ -241,7 +297,11 @@ export default function Home({ token, user }) {
                    : 'Other';
       osCounts[osType] = (osCounts[osType] || 0) + 1;
     });
-    return Object.entries(osCounts).map(([label, value]) => ({ label, value }));
+    return Object.entries(osCounts).map(([label, value]) => ({ 
+      label, 
+      value, 
+      color: osColors[label] || '#9e6a03' 
+    }));
   };
 
   if (stats.loading) {
@@ -262,6 +322,15 @@ export default function Home({ token, user }) {
   const detectionData = getDetectionStats();
   const agentData = getAgentStats();
   const osData = getOSStats();
+
+  console.log('[Home] Chart data:', {
+    detectionData,
+    agentData,
+    osData,
+    statsLoaded: !stats.loading,
+    agentCount: stats.agents.length,
+    alertCount: stats.alerts.length
+  });
 
   return (
     <div style={{
@@ -291,17 +360,14 @@ export default function Home({ token, user }) {
         <PieChart
           title="🎯 Detection Effectiveness"
           data={detectionData}
-          colors={['#1a7f37', '#9e6a03', '#6e7681']}
         />
         <PieChart
           title="🤖 Agent Status"
           data={agentData}
-          colors={['#3fb950', '#f85149']}
         />
         <PieChart
           title="💻 OS Distribution"
           data={osData}
-          colors={['#1f6feb', '#da3633', '#8b949e', '#9e6a03']}
         />
       </div>
 
@@ -312,3 +378,5 @@ export default function Home({ token, user }) {
     </div>
   );
 }
+
+export default Home;

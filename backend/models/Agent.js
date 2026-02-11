@@ -21,9 +21,9 @@ class AgentModel {
       `INSERT INTO agents (
         tenant_id, hostname, cn, os, arch, username, ip_address,
         latitude, longitude, geo_country, geo_region, geo_city,
-        cert_fingerprint, cert_issued_at, cert_expiry, cert_status,
+        cert_fingerprint, cert_issued_at, cert_expiry, cert_status, cert_id,
         status, first_seen, last_seen
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
       ON CONFLICT (id) DO UPDATE SET
         hostname = EXCLUDED.hostname,
         ip_address = EXCLUDED.ip_address,
@@ -46,6 +46,7 @@ class AgentModel {
         agentData.certIssuedAt || null,
         agentData.certExpiry || null,
         agentData.certStatus || 'active',
+        agentData.cert_id || null,
         'active'
       ]
     );
@@ -110,6 +111,21 @@ class AgentModel {
       'SELECT * FROM agents WHERE id = $1',
       [agentId]
     );
+    return result.rows[0] || null;
+  }
+  
+  static async findByCN(cn, tenantId = null) {
+    let sql = 'SELECT * FROM agents WHERE cn = $1';
+    const params = [cn];
+    
+    if (tenantId) {
+      sql += ' AND tenant_id = $2';
+      params.push(tenantId);
+    }
+    
+    sql += ' LIMIT 1';
+    
+    const result = await query(sql, params);
     return result.rows[0] || null;
   }
   

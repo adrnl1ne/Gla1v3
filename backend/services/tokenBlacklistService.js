@@ -1,5 +1,6 @@
 const redisClient = require('../utils/redisClient');
 const jwt = require('jsonwebtoken');
+const { query } = require('../db/connection');
 
 class TokenBlacklistService {
   /**
@@ -25,6 +26,9 @@ class TokenBlacklistService {
               console.log(`Token for agent ${agentId} already expired, skipping blacklist`);
               return { success: true, alreadyExpired: true };
             }
+          } else {
+            // Token isn't a valid JWT or has no expiration - default to 7 days
+            ttl = 7 * 24 * 60 * 60;
           }
         } catch (err) {
           console.error('Error decoding token for TTL:', err);
@@ -34,11 +38,13 @@ class TokenBlacklistService {
       }
 
       const key = redisClient.getKey('blacklist:agent', agentId, tenantId);
+      console.log(`[BLACKLIST-DEBUG] Creating Redis key: ${key} with TTL: ${ttl}s, tenantId: ${tenantId}`);
+      
       const metadata = JSON.stringify({
         token: token.substring(0, 20) + '...', // Store only prefix for audit
         reason,
         blacklistedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + ttl * 1000).toISOString()
+        expiresAt: ttl ? new Date(Date.now() + ttl * 1000).toISOString() : null
       });
 
       await redisClient.set(key, metadata, ttl);
@@ -47,9 +53,24 @@ class TokenBlacklistService {
       const setKey = redisClient.getKey('blacklist:set', 'agents', tenantId);
       await redisClient.sAdd(setKey, agentId);
 
+      // Persist to database for Redis restart resilience
+      const expiresAt = new Date(Date.now() + ttl * 1000);
+      try {
+        await query(
+          `INSERT INTO agent_blacklist (agent_id, tenant_id, reason, expires_at)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT ON CONSTRAINT unique_active_blacklist
+           DO UPDATE SET reason = $3, expires_at = $4, blacklisted_at = NOW()`,
+          [agentId, tenantId, reason, expiresAt]
+        );
+        console.log(`[BLACKLIST] Persisted to database: agent ${agentId}`);
+      } catch (dbErr) {
+        console.error('[BLACKLIST] DB persistence failed:', dbErr.message);
+      }
+
       console.log(`🚫 Agent ${agentId} token blacklisted for ${ttl}s: ${reason}`);
 
-      return { success: true, ttl, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() };
+      return { success: true, ttl, expiresAt: expiresAt.toISOString() };
     } catch (error) {
       console.error('Error blacklisting agent token:', error);
       throw error;
@@ -65,7 +86,9 @@ class TokenBlacklistService {
   async isAgentBlacklisted(agentId, tenantId) {
     try {
       const key = redisClient.getKey('blacklist:agent', agentId, tenantId);
+      console.log(`[BLACKLIST-DEBUG] Checking Redis key: ${key} (agentId: ${agentId}, tenantId: ${tenantId})`);
       const exists = await redisClient.exists(key);
+      console.log(`[BLACKLIST-DEBUG] Key exists: ${exists === 1}, raw value: ${exists}`);
       return exists === 1;
     } catch (error) {
       console.error('Error checking agent blacklist:', error);
@@ -114,6 +137,19 @@ class TokenBlacklistService {
       // Remove from tenant-wide set
       const setKey = redisClient.getKey('blacklist:set', 'agents', tenantId);
       await redisClient.sRem(setKey, agentId);
+
+      // Mark as revoked in database
+      try {
+        await query(
+          `UPDATE agent_blacklist 
+           SET revoked = true, revoked_at = NOW()
+           WHERE agent_id = $1 AND tenant_id = $2 AND revoked = false`,
+          [agentId, tenantId]
+        );
+        console.log(`[BLACKLIST] Marked as revoked in database: agent ${agentId}`);
+      } catch (dbErr) {
+        console.error('[BLACKLIST] DB revoke update failed:', dbErr.message);
+      }
 
       console.log(`✅ Agent ${agentId} removed from blacklist`);
       return { success: true };
@@ -210,6 +246,52 @@ class TokenBlacklistService {
     } catch (error) {
       console.error('Error checking user token blacklist:', error);
       return false; // Fail open
+    }
+  }
+
+  /**
+   * Sync active blacklist entries from database to Redis
+   * Called on startup to restore blacklist state after Redis restart
+   */
+  async syncFromDatabase() {
+    try {
+      const result = await query(
+        `SELECT agent_id, tenant_id, reason, expires_at, blacklisted_at
+         FROM agent_blacklist
+         WHERE revoked = false AND (expires_at IS NULL OR expires_at > NOW())`,
+        []
+      );
+
+      let synced = 0;
+      for (const row of result.rows) {
+        const ttl = row.expires_at 
+          ? Math.floor((new Date(row.expires_at) - new Date()) / 1000)
+          : 7 * 24 * 60 * 60;
+
+        if (ttl > 0) {
+          const key = redisClient.getKey('blacklist:agent', row.agent_id, row.tenant_id);
+          const metadata = JSON.stringify({
+            token: 'synced-from-db',
+            reason: row.reason,
+            blacklistedAt: row.blacklisted_at,
+            expiresAt: row.expires_at
+          });
+
+          await redisClient.set(key, metadata, ttl);
+
+          // Add to tenant set
+          const setKey = redisClient.getKey('blacklist:set', 'agents', row.tenant_id);
+          await redisClient.sAdd(setKey, row.agent_id);
+
+          synced++;
+        }
+      }
+
+      console.log(`[BLACKLIST] Synced ${synced} entries from database to Redis`);
+      return { success: true, synced };
+    } catch (error) {
+      console.error('[BLACKLIST] Failed to sync from database:', error);
+      return { success: false, error: error.message };
     }
   }
 }

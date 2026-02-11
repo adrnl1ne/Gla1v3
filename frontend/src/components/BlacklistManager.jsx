@@ -20,7 +20,7 @@ const BlacklistManager = () => {
 
   const fetchTenants = async () => {
     try {
-      const token = localStorage.getItem('dashboardToken');
+      const token = localStorage.getItem('gla1v3_token');
       const response = await fetch('https://api.gla1v3.local/api/tenants', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -52,7 +52,7 @@ const BlacklistManager = () => {
     setError('');
 
     try {
-      const token = localStorage.getItem('dashboardToken');
+      const token = localStorage.getItem('gla1v3_token');
       const response = await fetch(`https://api.gla1v3.local/api/agents/blacklist/list?tenant_id=${selectedTenant}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -77,7 +77,7 @@ const BlacklistManager = () => {
     }
 
     try {
-      const token = localStorage.getItem('dashboardToken');
+      const token = localStorage.getItem('gla1v3_token');
       const response = await fetch(`https://api.gla1v3.local/api/agents/${agentId}/blacklist`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }

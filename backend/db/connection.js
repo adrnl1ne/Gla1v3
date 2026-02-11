@@ -1,5 +1,9 @@
 // PostgreSQL Database Connection Pool
 const { Pool } = require('pg');
+const { AsyncLocalStorage } = require('async_hooks');
+
+// Request-scoped storage for database client (for RLS context)
+const requestContext = new AsyncLocalStorage();
 
 const config = {
   host: process.env.DB_HOST || 'localhost',
@@ -41,10 +45,15 @@ pool.query('SELECT NOW()', (err, res) => {
 });
 
 // Helper function to execute queries with error handling
+// This automatically uses the request-scoped client if available (for RLS)
 async function query(text, params) {
   const start = Date.now();
+  const contextClient = requestContext.getStore();
+  
   try {
-    const res = await pool.query(text, params);
+    // Use request-scoped client if available, otherwise use pool
+    const client = contextClient || pool;
+    const res = await client.query(text, params);
     const duration = Date.now() - start;
     
     if (duration > 1000) {
@@ -62,16 +71,44 @@ async function query(text, params) {
 
 // Helper function to get a client from pool for transactions
 async function getClient() {
-  return await pool.query();
+  return await pool.connect();
 }
 
 // Set current user context for Row-Level Security
 async function setCurrentUser(userId) {
   try {
-    await pool.query('SELECT set_current_user($1)', [userId]);
+    await pool.query("SELECT set_config('app.current_user_id', $1, false)", [userId]);
   } catch (error) {
     console.error('[DB] Failed to set current user context:', error.message);
     throw error;
+  }
+}
+
+// Execute a query with RLS context
+async function queryWithContext(userId, text, params) {
+  const client = await pool.connect();
+  try {
+    // Set user context for this connection
+    await client.query("SELECT set_config('app.current_user_id', $1, false)", [userId]);
+    // Execute the actual query
+    const result = await client.query(text, params);
+    return result;
+  } finally {
+    client.release();
+  }
+}
+
+// Run a function with request-scoped database client and RLS context
+async function withRLSContext(userId, fn) {
+  const client = await pool.connect();
+  try {
+    // Set RLS context
+    await client.query("SELECT set_config('app.current_user_id', $1, false)", [userId]);
+    
+    // Run the function with this client in context
+    return await requestContext.run(client, fn);
+  } finally {
+    client.release();
   }
 }
 
@@ -87,4 +124,7 @@ module.exports = {
   query,
   getClient,
   setCurrentUser,
+  queryWithContext,
+  withRLSContext,
+  requestContext,
 };

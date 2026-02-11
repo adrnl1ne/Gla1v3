@@ -43,10 +43,12 @@ class TenantModel {
   
   // Find tenant by API key
   static async findByApiKey(apiKey) {
+    console.log(`[TENANT] Looking up tenant by API key: ${apiKey}`);
     const result = await query(
       'SELECT * FROM tenants WHERE api_key = $1',
       [apiKey]
     );
+    console.log(`[TENANT] findByApiKey result:`, result.rows[0] || 'NOT FOUND');
     return result.rows[0] || null;
   }
   
@@ -174,7 +176,10 @@ class TenantModel {
   
   // Get default tenant (for backward compatibility)
   static async getDefault() {
-    return await TenantModel.findByName('Default');
+    console.log('[TENANT] Getting default tenant');
+    const tenant = await TenantModel.findByName('Default');
+    console.log('[TENANT] getDefault result:', tenant || 'NOT FOUND');
+    return tenant;
   }
 }
 

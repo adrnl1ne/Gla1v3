@@ -23,7 +23,16 @@ router.get('/', async (req, res) => {
     // Support both tenant_id and tenantId for backward compatibility
     const tenantId = req.query.tenant_id || req.query.tenantId || null;
     const agents = await AgentService.getAllAgents(tenantId);
-    res.json(agents);
+    
+    // Add blacklist status to each agent
+    const agentsWithBlacklistStatus = await Promise.all(
+      agents.map(async (agent) => {
+        const isBlacklisted = await tokenBlacklistService.isAgentBlacklisted(agent.id, agent.tenant_id);
+        return { ...agent, is_blacklisted: isBlacklisted };
+      })
+    );
+    
+    res.json(agentsWithBlacklistStatus);
   } catch (error) {
     console.error('[AGENTS] Error listing agents:', error);
     res.status(500).json({ error: 'Failed to retrieve agents' });
@@ -79,20 +88,6 @@ router.post('/beacon', async (req, res) => {
       }
     }
     
-    // CHECK BLACKLIST - Reject if agent is compromised
-    if (agentData.id && tenantId) {
-      const isBlacklisted = await tokenBlacklistService.isAgentBlacklisted(agentData.id, tenantId);
-      if (isBlacklisted) {
-        const blacklistInfo = await tokenBlacklistService.getBlacklistInfo(agentData.id, tenantId);
-        console.log(`🚫 [BEACON] BLOCKED - Agent ${agentData.id} is blacklisted: ${blacklistInfo?.reason || 'Unknown'}`);
-        return res.status(403).json({ 
-          error: 'Agent access revoked', 
-          reason: blacklistInfo?.reason || 'Compromised',
-          blacklistedAt: blacklistInfo?.blacklistedAt
-        });
-      }
-    }
-    
     // Determine IP (prefer publicIp from agent, fallback to x-forwarded-for)
     const providedPublic = agentData.publicIp ? String(agentData.publicIp).trim() : null;
     const ipHeader = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString();
@@ -101,6 +96,21 @@ router.post('/beacon', async (req, res) => {
     agentData.ip = ipNorm;
     
     const agent = await AgentService.handleBeacon(agentData, clientCert, tenantId);
+    
+    // CHECK BLACKLIST - Reject if agent is compromised
+    // This check must happen AFTER handleBeacon so we have agent.tenant_id
+    if (agent && agent.id && agent.tenant_id) {
+      const isBlacklisted = await tokenBlacklistService.isAgentBlacklisted(agent.id, agent.tenant_id);
+      if (isBlacklisted) {
+        const blacklistInfo = await tokenBlacklistService.getBlacklistInfo(agent.id, agent.tenant_id);
+        console.log(`🚫 [BEACON] BLOCKED - Agent ${agent.id} is blacklisted: ${blacklistInfo?.reason || 'Unknown'}`);
+        return res.status(403).json({ 
+          error: 'Agent access revoked', 
+          reason: blacklistInfo?.reason || 'Compromised',
+          blacklistedAt: blacklistInfo?.blacklistedAt
+        });
+      }
+    }
     
     // Cache agent status for quick lookups
     await cacheService.cacheAgentStatus(agent.id, {
@@ -655,10 +665,10 @@ router.get('/blacklist/list', authenticateJWT, async (req, res) => {
     }
     
     // Get all blacklisted agents for tenant
-    const blacklistedAgents = await tokenBlacklistService.getBlacklistedAgents(parseInt(tenantId));
+    const blacklistedAgents = await tokenBlacklistService.getBlacklistedAgents(tenantId);
     
     res.json({
-      tenantId: parseInt(tenantId),
+      tenantId: tenantId,
       count: blacklistedAgents.length,
       agents: blacklistedAgents
     });

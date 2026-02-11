@@ -4,8 +4,27 @@ const router = express.Router();
 const TaskService = require('../services/taskService');
 const AgentService = require('../services/agentService');
 const TenantModel = require('../models/Tenant');
+const TaskModel = require('../models/Task');
 const taskQueueService = require('../services/taskQueueService');
 const { auditAction } = require('../middleware/audit');
+
+// Get recent tasks (for dashboard)
+router.get('/recent', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const tenantId = req.query.tenant_id;
+    
+    let tasks = await TaskModel.getAll(tenantId);
+    
+    // Apply limit
+    tasks = tasks.slice(0, limit);
+    
+    res.json(tasks);
+  } catch (err) {
+    console.error('Error getting recent tasks:', err);
+    res.status(500).json({ error: 'Failed to retrieve recent tasks' });
+  }
+});
 
 // Create task for agent
 router.post('/', auditAction('create_task'), async (req, res) => {

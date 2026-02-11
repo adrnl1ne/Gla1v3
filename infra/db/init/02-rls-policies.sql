@@ -41,6 +41,12 @@ CREATE POLICY operator_assigned_tenants ON tenants
         )
     );
 
+-- Allow service-level tenant lookups (no user context needed) for agent beacons
+CREATE POLICY service_tenant_access ON tenants
+    FOR SELECT
+    TO PUBLIC
+    USING (current_setting('app.current_user_id', true) IS NULL);
+
 -- ============================================================================
 -- RLS POLICIES FOR AGENTS TABLE
 -- ============================================================================
@@ -69,6 +75,13 @@ CREATE POLICY operator_tenant_agents ON agents
         )
     );
 
+-- Allow service-level agent operations (beacons, registration) without user context
+CREATE POLICY service_agent_access ON agents
+    FOR ALL
+    TO PUBLIC
+    USING (current_setting('app.current_user_id', true) IS NULL)
+    WITH CHECK (current_setting('app.current_user_id', true) IS NULL);
+
 -- ============================================================================
 -- RLS POLICIES FOR TASKS TABLE
 -- ============================================================================
@@ -85,7 +98,7 @@ CREATE POLICY admin_all_tasks ON tasks
         )
     );
 
--- Operators can only see tasks from their assigned tenants
+--Operators can only see tasks from their assigned tenants
 CREATE POLICY operator_tenant_tasks ON tasks
     FOR ALL
     TO PUBLIC
@@ -96,6 +109,13 @@ CREATE POLICY operator_tenant_tasks ON tasks
             AND user_tenants.user_id = current_setting('app.current_user_id', true)::uuid
         )
     );
+
+-- Allow service-level task operations without user context (for agent beacons)
+CREATE POLICY service_task_access ON tasks
+    FOR ALL
+    TO PUBLIC
+    USING (current_setting('app.current_user_id', true) IS NULL)
+    WITH CHECK (current_setting('app.current_user_id', true) IS NULL);
 
 -- ============================================================================
 -- RLS POLICIES FOR RESULTS TABLE
@@ -125,6 +145,13 @@ CREATE POLICY operator_tenant_results ON results
         )
     );
 
+-- Allow service-level result operations without user context (for agent task results)
+CREATE POLICY service_result_access ON results
+    FOR ALL
+    TO PUBLIC
+    USING (current_setting('app.current_user_id', true) IS NULL)
+    WITH CHECK (current_setting('app.current_user_id', true) IS NULL);
+
 -- ============================================================================
 -- HELPER FUNCTION: Set current user context
 -- ============================================================================
@@ -132,6 +159,8 @@ CREATE POLICY operator_tenant_results ON results
 CREATE OR REPLACE FUNCTION set_current_user(user_uuid UUID)
 RETURNS void AS $$
 BEGIN
+    -- Set for transaction (false = transaction-local, will be cleared after transaction)
+    -- The application should use queryWithContext() to ensure proper context per query
     PERFORM set_config('app.current_user_id', user_uuid::text, false);
 END;
 $$ LANGUAGE plpgsql;
@@ -166,3 +195,47 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 COMMENT ON FUNCTION get_user_tenants IS 'Get all tenants accessible by a user. Admins see all, operators see assigned.';
+
+-- ============================================================================
+-- RLS POLICIES FOR AGENT_BLACKLIST TABLE (Run after 06-blacklist-table.sql)
+-- ============================================================================
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'agent_blacklist') THEN
+        -- Enable RLS
+        ALTER TABLE agent_blacklist ENABLE ROW LEVEL SECURITY;
+        
+        -- Admins can see all blacklist entries
+        CREATE POLICY admin_all_blacklist ON agent_blacklist
+            FOR ALL
+            TO PUBLIC
+            USING (
+                EXISTS (
+                    SELECT 1 FROM users
+                    WHERE users.id = current_setting('app.current_user_id', true)::uuid
+                    AND users.role = 'admin'
+                )
+            );
+        
+        -- Operators can only see blacklist entries from their assigned tenants
+        CREATE POLICY operator_tenant_blacklist ON agent_blacklist
+            FOR ALL
+            TO PUBLIC
+            USING (
+                EXISTS (
+                    SELECT 1 FROM user_tenants
+                    WHERE user_tenants.tenant_id = agent_blacklist.tenant_id
+                    AND user_tenants.user_id = current_setting('app.current_user_id', true)::uuid
+                )
+            );
+        
+        -- Allow service-level blacklist operations without user context
+        CREATE POLICY service_blacklist_access ON agent_blacklist
+            FOR ALL
+            TO PUBLIC
+            USING (current_setting('app.current_user_id', true) IS NULL)
+            WITH CHECK (current_setting('app.current_user_id', true) IS NULL);
+    END IF;
+END $$;
+

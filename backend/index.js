@@ -15,6 +15,7 @@ const { authenticateJWT } = require('./middleware/auth');
 // Services
 const AuthService = require('./services/authService');
 const EDRService = require('./services/edrService');
+const tokenBlacklistService = require('./services/tokenBlacklistService');
 const WazuhIndexer = require('./utils/wazuhIndexer');
 const redisClient = require('./utils/redisClient');
 
@@ -36,6 +37,10 @@ validateSecrets();
     await redisClient.connect();
     await AuthService.initializeDefaultAdmin();
     EDRService.initialize();
+    
+    // Sync blacklist from database to Redis
+    await tokenBlacklistService.syncFromDatabase();
+    
     WazuhIndexer.startIndexer();
     console.log('✅ All services initialized');
   } catch (err) {

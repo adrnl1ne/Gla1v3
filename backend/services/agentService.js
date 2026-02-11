@@ -1,13 +1,16 @@
 // Agent Service
 const AgentModel = require('../models/Agent');
 const TenantModel = require('../models/Tenant');
+const CAClient = require('../utils/caClient');
 const { config } = require('../config/env');
 
 class AgentService {
   static async handleBeacon(agentData, clientCert, tenantId = null) {
     const agentId = agentData.id || this.extractCNFromCert(clientCert);
+    const cn = agentData.cn || this.extractCNFromCert(clientCert);
     
-    let agent = await AgentModel.findById(agentId);
+    // Look up agent by CN (certificate common name) instead of agent-provided ID
+    let agent = await AgentModel.findByCN(cn, tenantId);
     
     if (!agent) {
       // If no tenant specified, use default tenant
@@ -20,18 +23,29 @@ class AgentService {
         throw new Error('No tenant available for agent registration');
       }
       
+      // Generate certificate from CA service for this agent
+      let certId = null;
+      try {
+        const certData = await CAClient.generateCertificate(agentId, agentId, 3600);
+        certId = certData.certId;
+        console.log(`[AGENT] Generated dynamic certificate: ${certId}`);
+      } catch (err) {
+        console.warn(`[AGENT] Failed to generate certificate from CA: ${err.message}`);
+        // Continue without cert_id - fallback to static embedded cert
+      }
+      
       agent = await AgentModel.register({
-        id: agentId,
-        cn: agentData.cn || this.extractCNFromCert(clientCert),
+        cn: cn,
         hostname: agentData.hostname,
         os: agentData.os,
         arch: agentData.arch,
         user: agentData.user,
-        ip: agentData.ip
+        ip: agentData.ip,
+        cert_id: certId
       }, tenantId);
     } else {
-      agent = await AgentModel.update(agentId, {
-        cn: agentData.cn || agent.cn || this.extractCNFromCert(clientCert),
+      agent = await AgentModel.update(agent.id, {
+        cn: cn,
         hostname: agentData.hostname,
         os: agentData.os,
         arch: agentData.arch,

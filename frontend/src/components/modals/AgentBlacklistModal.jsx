@@ -17,7 +17,7 @@ const AgentBlacklistModal = ({ agent, onClose, onBlacklist }) => {
     setError('');
 
     try {
-      const token = localStorage.getItem('dashboardToken');
+      const token = localStorage.getItem('gla1v3_token');
       const payload = {
         reason: reason.trim()
       };

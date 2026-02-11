@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Splash from './components/Splash';
 import Dashboard from './components/Dashboard';
+import TestHome from './components/TestHome';
 import Login from './components/Login';
 import { TenantProvider } from './context/TenantContext';
 

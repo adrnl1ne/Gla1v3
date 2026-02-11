@@ -73,6 +73,7 @@ services:
       - "traefik.http.routers.c2-health.entrypoints=websecure"
       - "traefik.http.routers.c2-health.tls=true"
       - "traefik.http.routers.c2-health.service=backend-api-svc"
+      - "traefik.docker.network=infra_gla1v3-net"
     networks:
       - gla1v3-net
       - wazuh-net
@@ -86,6 +87,7 @@ services:
       - "traefik.http.routers.dashboard.rule=Host(`dashboard.gla1v3.local`) || Host(`gla1v3.local`)"
       - "traefik.http.routers.dashboard.entrypoints=websecure"
       - "traefik.http.routers.dashboard.tls=true"
+      - "traefik.http.routers.dashboard.middlewares=rate-limit@file,request-size-limit@file"
       - "traefik.http.services.dashboard.loadbalancer.server.port=5173"
     networks:
       - gla1v3-net
