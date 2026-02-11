@@ -4,6 +4,81 @@ import { useEffect, useState } from 'react';
 const d3fendLink = (technique) => `https://d3fend.mitre.org/offensive-technique/attack/${technique}`;
 const mitreLink = (technique) => `https://attack.mitre.org/techniques/${technique}`;
 
+// Detection status badge component
+const DetectionBadge = ({ alert }) => {
+  // Determine detection status based on alert severity and context
+  // High severity (10+) = EDR detected and alerted (bad for red team)
+  // Medium severity (7-9) = Suspicious activity detected
+  // Low severity (<7) = Logged but not actively detected
+  const getDetectionStatus = () => {
+    if (alert.detectionStatus) {
+      return alert.detectionStatus; // Use explicit status if provided
+    }
+    
+    // Heuristic: High severity alerts indicate EDR detected the activity
+    if (alert.level >= 10) return 'detected';
+    if (alert.level >= 7) return 'suspicious';
+    return 'evaded';
+  };
+  
+  const status = getDetectionStatus();
+  
+  const badges = {
+    detected: {
+      icon: '✅',
+      label: 'Detected',
+      bg: '#1a7f37',
+      color: '#fff',
+      title: 'EDR actively detected and alerted on this activity'
+    },
+    suspicious: {
+      icon: '⚠️',
+      label: 'Suspicious',
+      bg: '#9e6a03',
+      color: '#fff',
+      title: 'EDR flagged as suspicious but may not have blocked'
+    },
+    evaded: {
+      icon: '❌',
+      label: 'Evaded',
+      bg: '#6e7681',
+      color: '#fff',
+      title: 'Activity logged but appears to have evaded active detection'
+    },
+    unknown: {
+      icon: '❓',
+      label: 'Unknown',
+      bg: '#484f58',
+      color: '#c9d1d9',
+      title: 'Detection status could not be determined'
+    }
+  };
+  
+  const badge = badges[status] || badges.unknown;
+  
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+      <span 
+        style={{ 
+          background: badge.bg,
+          color: badge.color,
+          padding: '4px 10px',
+          borderRadius: 12,
+          fontSize: '0.75rem',
+          fontWeight: '600',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.3rem',
+          whiteSpace: 'nowrap'
+        }}
+        title={badge.title}>
+        <span style={{ fontSize: '0.9rem' }}>{badge.icon}</span>
+        {badge.label}
+      </span>
+    </div>
+  );
+};
+
 const AlertRow = ({ alert }) => {
   const levelColor = alert.level >= 10 ? '#ff4444' : alert.level >= 7 ? '#ffaa00' : '#ffff00';
   
@@ -34,6 +109,9 @@ const AlertRow = ({ alert }) => {
       </td>
       <td style={{ padding: '0.8rem', maxWidth: 320, wordBreak: 'break-word' }}>
         {alert.description}
+      </td>
+      <td style={{ padding: '0.8rem' }}>
+        <DetectionBadge alert={alert} />
       </td>
       <td style={{ padding: '0.8rem' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -198,6 +276,7 @@ export default function AlertTable() {
             <tr>
               <th>Timestamp</th>
               <th>EDR</th>
+              <th>Detection</th>
               <th>Agent</th>
               <th>Severity</th>
               <th>Description</th>
@@ -207,7 +286,7 @@ export default function AlertTable() {
           </thead>
           <tbody>
             {alerts.length === 0 ? (
-              <tr>
+              <tr>8
                 <td colSpan="7" style={{ padding: '2rem', textAlign: 'center', color: '#8b949e' }}>
                   No alerts found. System is clean or EDR is still initializing.
                 </td>

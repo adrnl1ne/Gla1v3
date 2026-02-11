@@ -1,0 +1,314 @@
+import { useState, useEffect } from 'react';
+import PurpleTeamTimeline from './PurpleTeamTimeline';
+
+// Simple Pie Chart Component
+function PieChart({ data, title, colors }) {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+  
+  // Handle empty data case
+  if (total === 0) {
+    return (
+      <div style={{
+        background: '#161b22',
+        border: '1px solid #30363d',
+        borderRadius: 12,
+        padding: '1.5rem',
+        overflow: 'hidden'
+      }}>
+        <h3 style={{
+          margin: '0 0 1.5rem 0',
+          color: '#c9d1d9',
+          fontSize: '1.1rem',
+          fontWeight: '600'
+        }}>
+          {title}
+        </h3>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
+          {/* Empty Chart SVG */}
+          <svg viewBox="0 0 100 100" style={{ width: 180, height: 180 }}>
+            <circle cx="50" cy="50" r="45" fill="#0d1117" stroke="#30363d" strokeWidth="2" />
+            <circle cx="50" cy="50" r="20" fill="#0d1117" />
+          </svg>
+
+          {/* Legend */}
+          <div style={{ flex: 1 }}>
+            {data.map((item, idx) => (
+              <div key={idx} style={{
+                display: 'flex',
+                alignItems: 'center',
+                marginBottom: '0.75rem',
+                fontSize: '0.9rem'
+              }}>
+                <div style={{
+                  width: 16,
+                  height: 16,
+                  background: colors[idx % colors.length],
+                  borderRadius: 4,
+                  marginRight: '0.75rem'
+                }} />
+                <div style={{ flex: 1, color: '#c9d1d9' }}>
+                  {item.label}
+                </div>
+                <div style={{ color: '#8b949e', fontWeight: '600' }}>
+                  {item.value} <span style={{ color: '#6e7681', fontSize: '0.85rem' }}>(0%)</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  let currentAngle = 0;
+
+  const slices = data.map((item, index) => {
+    const percentage = (item.value / total) * 100;
+    const angle = (item.value / total) * 360;
+    const startAngle = currentAngle;
+    currentAngle += angle;
+
+    // Calculate path for pie slice
+    const startX = 50 + 45 * Math.cos((Math.PI / 180) * (startAngle - 90));
+    const startY = 50 + 45 * Math.sin((Math.PI / 180) * (startAngle - 90));
+    const endX = 50 + 45 * Math.cos((Math.PI / 180) * (startAngle + angle - 90));
+    const endY = 50 + 45 * Math.sin((Math.PI / 180) * (startAngle + angle - 90));
+    const largeArc = angle > 180 ? 1 : 0;
+
+    return {
+      ...item,
+      path: `M 50 50 L ${startX} ${startY} A 45 45 0 ${largeArc} 1 ${endX} ${endY} Z`,
+      color: colors[index % colors.length],
+      percentage: percentage.toFixed(1)
+    };
+  });
+
+  return (
+    <div style={{
+      background: '#161b22',
+      border: '1px solid #30363d',
+      borderRadius: 12,
+      padding: '1.5rem',      overflow: 'hidden'
+    }}>
+      <h3 style={{
+        margin: '0 0 1.5rem 0',
+        color: '#c9d1d9',
+        fontSize: '1.1rem',
+        fontWeight: '600'
+      }}>
+        {title}
+      </h3>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
+        {/* Pie Chart SVG */}
+        <svg viewBox="0 0 100 100" style={{ width: 180, height: 180 }}>
+          <circle cx="50" cy="50" r="45" fill="#0d1117" />
+          {slices.map((slice, idx) => (
+            <path
+              key={idx}
+              d={slice.path}
+              fill={slice.color}
+              stroke="#0d1117"
+              strokeWidth="1"
+            >
+              <title>{`${slice.label}: ${slice.value} (${slice.percentage}%)`}</title>
+            </path>
+          ))}
+          <circle cx="50" cy="50" r="20" fill="#0d1117" />
+        </svg>
+
+        {/* Legend */}
+        <div style={{ flex: 1 }}>
+          {slices.map((slice, idx) => (
+            <div key={idx} style={{
+              display: 'flex',
+              alignItems: 'center',
+              marginBottom: '0.75rem',
+              fontSize: '0.9rem'
+            }}>
+              <div style={{
+                width: 16,
+                height: 16,
+                background: slice.color,
+                borderRadius: 4,
+                marginRight: '0.75rem'
+              }} />
+              <div style={{ flex: 1, color: '#c9d1d9' }}>
+                {slice.label}
+              </div>
+              <div style={{ color: '#8b949e', fontWeight: '600' }}>
+                {slice.value} <span style={{ color: '#6e7681', fontSize: '0.85rem' }}>({slice.percentage}%)</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Home({ token, user }) {
+  const [stats, setStats] = useState({
+    agents: [],
+    tasks: [],
+    alerts: [],
+    loading: true
+  });
+
+  useEffect(() => {
+    fetchDashboardData();
+    const interval = setInterval(fetchDashboardData, 10000); // Refresh every 10s
+    return () => clearInterval(interval);
+  }, [token]);
+
+  const fetchDashboardData = async () => {
+    try {
+      const [agentsRes, tasksRes, alertsRes] = await Promise.all([
+        fetch('https://api.gla1v3.local/api/agents', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch('https://api.gla1v3.local/api/tasks/recent?limit=100', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }).catch(() => ({ json: async () => [] })),
+        fetch('https://api.gla1v3.local/api/alerts/recent', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+      ]);
+
+      const agents = await agentsRes.json();
+      const tasks = Array.isArray(await tasksRes.json()) ? await tasksRes.json() : [];
+      const alerts = await alertsRes.json();
+
+      setStats({ agents, tasks, alerts, loading: false });
+    } catch (err) {
+      console.error('Failed to fetch dashboard data:', err);
+      setStats(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  // Calculate detection effectiveness
+  const getDetectionStats = () => {
+    if (stats.alerts.length === 0) {
+      return [{ label: 'No Data', value: 1, color: '#6e7681' }];
+    }
+    
+    const detected = stats.alerts.filter(a => a.level >= 10).length;
+    const suspicious = stats.alerts.filter(a => a.level >= 7 && a.level < 10).length;
+    const evaded = stats.alerts.filter(a => a.level < 7).length;
+
+    return [
+      { label: 'Detected', value: detected },
+      { label: 'Suspicious', value: suspicious },
+      { label: 'Evaded', value: evaded }
+    ].filter(item => item.value > 0);
+  };
+
+  // Calculate agent status
+  const getAgentStats = () => {
+    if (stats.agents.length === 0) {
+      return [
+        { label: 'Active', value: 0 },
+        { label: 'Inactive', value: 0 }
+      ];
+    }
+    const now = Date.now();
+    const active = stats.agents.filter(a => {
+      const lastSeen = new Date(a.last_seen || a.lastSeen);
+      return (now - lastSeen) / 1000 < 120;
+    }).length;
+    const inactive = stats.agents.filter(a => {
+      const lastSeen = new Date(a.last_seen || a.lastSeen);
+      return (now - lastSeen) / 1000 >= 120;
+    }).length;
+    return [
+      { label: 'Active', value: active },
+      { label: 'Inactive', value: inactive }
+    ];
+  };
+
+  // Calculate OS distribution
+  const getOSStats = () => {
+    if (stats.agents.length === 0) {
+      return [{ label: 'No Data', value: 0, color: '#6e7681' }];
+    }
+    const osCounts = {};
+    stats.agents.forEach(a => {
+      const os = a.os || 'Unknown';
+      const osType = os.toLowerCase().includes('windows') ? 'Windows' 
+                   : os.toLowerCase().includes('linux') ? 'Linux'
+                   : os.toLowerCase().includes('darwin') || os.toLowerCase().includes('mac') ? 'macOS'
+                   : 'Other';
+      osCounts[osType] = (osCounts[osType] || 0) + 1;
+    });
+    return Object.entries(osCounts).map(([label, value]) => ({ label, value }));
+  };
+
+  if (stats.loading) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        color: '#8b949e',
+        fontSize: '1.2rem'
+      }}>
+        Loading dashboard...
+      </div>
+    );
+  }
+
+  const detectionData = getDetectionStats();
+  const agentData = getAgentStats();
+  const osData = getOSStats();
+
+  return (
+    <div style={{
+      padding: '2rem',
+      paddingRight: '2.5rem',
+      height: '100%',
+      overflowY: 'auto',
+      position: 'relative'
+    }}>
+      {/* Header */}
+      <div style={{ marginBottom: '2rem' }}>
+        <h1 style={{ margin: 0, color: '#c9d1d9', fontSize: '2.5rem', fontWeight: '700', display: 'inline-block' }}>
+          GLA1V3 C2 Dashboard
+        </h1>
+      </div>
+      <div style={{ color: '#8b949e', fontSize: '1rem', marginBottom: '1.5rem' }}>
+        Real-time operational intelligence and purple team metrics
+      </div>
+
+      {/* Statistics Cards */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+        gap: '1.5rem',
+        marginBottom: '2rem'
+      }}>
+        <PieChart
+          title="🎯 Detection Effectiveness"
+          data={detectionData}
+          colors={['#1a7f37', '#9e6a03', '#6e7681']}
+        />
+        <PieChart
+          title="🤖 Agent Status"
+          data={agentData}
+          colors={['#3fb950', '#f85149']}
+        />
+        <PieChart
+          title="💻 OS Distribution"
+          data={osData}
+          colors={['#1f6feb', '#da3633', '#8b949e', '#9e6a03']}
+        />
+      </div>
+
+      {/* Purple Team Timeline */}
+      <div style={{ marginBottom: '2rem' }}>
+        <PurpleTeamTimeline token={token} />
+      </div>
+    </div>
+  );
+}

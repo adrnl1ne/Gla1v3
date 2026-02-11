@@ -1,0 +1,19 @@
+-- Create non-privileged application user for Row-Level Security
+-- gla1v3_app remains as superuser (for migrations/admin only)
+-- gla1v3_api is the user the backend application uses
+
+-- Create API user without superuser/bypassrls
+-- Note: Uses same password as POSTGRES_PASSWORD from docker-compose
+CREATE ROLE gla1v3_api WITH LOGIN PASSWORD :'DB_PASSWORD';
+
+-- Grant necessary privileges
+GRANT CONNECT ON DATABASE gla1v3 TO gla1v3_api;
+GRANT USAGE, CREATE ON SCHEMA public TO gla1v3_api;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO gla1v3_api;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO gla1v3_api;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO gla1v3_api;
+
+-- Set default privileges for future objects
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO gla1v3_api;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO gla1v3_api;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO gla1v3_api;

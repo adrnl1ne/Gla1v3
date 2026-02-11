@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { TaskModal } from './modals';
 
-export default function TaskPanel({ agent, onClose }) {
+export default function TaskPanel({ agent, token, onClose }) {
   const [cmd, setCmd] = useState('');
   const [args, setArgs] = useState('');
   const [tasks, setTasks] = useState([]);
@@ -16,7 +16,9 @@ export default function TaskPanel({ agent, onClose }) {
 
   const fetchTasks = async () => {
     try {
-      const res = await fetch(`https://api.gla1v3.local/api/agents/${agent.id}/tasks`);
+      const res = await fetch(`https://api.gla1v3.local/api/agents/${agent.id}/tasks`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const data = await res.json();
       setTasks(data);
     } catch (err) {
@@ -32,7 +34,10 @@ export default function TaskPanel({ agent, onClose }) {
       const argsArray = args.trim() ? args.trim().split(' ') : [];
       const res = await fetch(`https://api.gla1v3.local/api/agents/${agent.id}/tasks`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
         body: JSON.stringify({ cmd, args: argsArray })
       });
       
@@ -53,7 +58,10 @@ export default function TaskPanel({ agent, onClose }) {
     try {
       const res = await fetch(`https://api.gla1v3.local/api/agents/${agent.id}/tasks`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
         body: JSON.stringify({
           type: 'embedded',
           taskType: task.type,

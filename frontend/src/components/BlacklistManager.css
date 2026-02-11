@@ -1,0 +1,203 @@
+.blacklist-manager {
+  padding: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.blacklist-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #00ff00;
+}
+
+.blacklist-header h2 {
+  font-size: 24px;
+  color: #00ff00;
+  margin: 0;
+}
+
+.tenant-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tenant-selector label {
+  font-weight: bold;
+  color: #00ff00;
+}
+
+.tenant-selector select {
+  background: #1a1a1a;
+  color: #00ff00;
+  border: 1px solid #00ff00;
+  padding: 8px 15px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  cursor: pointer;
+}
+
+.tenant-selector select:hover {
+  background: #0a0a0a;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: #00ff00;
+  font-size: 18px;
+}
+
+.error-message {
+  background: rgba(255, 0, 0, 0.1);
+  border: 1px solid #ff0000;
+  color: #ff0000;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #00ff00;
+  font-size: 18px;
+}
+
+.empty-state p {
+  margin: 0;
+}
+
+.blacklist-table-container {
+  overflow-x: auto;
+  margin-bottom: 30px;
+}
+
+.blacklist-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #0a0a0a;
+  border: 1px solid #00ff00;
+}
+
+.blacklist-table thead {
+  background: #1a1a1a;
+}
+
+.blacklist-table th {
+  padding: 12px 15px;
+  text-align: left;
+  color: #00ff00;
+  font-weight: bold;
+  border-bottom: 2px solid #00ff00;
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.blacklist-table tbody tr {
+  border-bottom: 1px solid #333;
+  transition: background 0.2s;
+}
+
+.blacklist-table tbody tr:hover {
+  background: #1a1a1a;
+}
+
+.blacklist-table td {
+  padding: 12px 15px;
+  color: #00ff00;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.blacklist-table .agent-id {
+  font-weight: bold;
+  color: #ff0000;
+}
+
+.blacklist-table .reason {
+  max-width: 300px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.blacklist-table .ttl {
+  font-weight: bold;
+}
+
+.blacklist-table .ttl-warning {
+  color: #ffa500;
+}
+
+.btn {
+  padding: 8px 16px;
+  border: 1px solid;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.btn-remove {
+  background: #1a1a1a;
+  color: #00ff00;
+  border-color: #00ff00;
+}
+
+.btn-remove:hover {
+  background: #00ff00;
+  color: #000;
+}
+
+.blacklist-info {
+  background: rgba(0, 255, 0, 0.05);
+  border: 1px solid #00ff00;
+  padding: 15px 20px;
+  border-radius: 4px;
+  margin-top: 30px;
+}
+
+.blacklist-info p {
+  margin: 0;
+  color: #00ff00;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.blacklist-info strong {
+  color: #00ff00;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .blacklist-table {
+    font-size: 12px;
+  }
+  
+  .blacklist-table th,
+  .blacklist-table td {
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .blacklist-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+  }
+  
+  .blacklist-table-container {
+    overflow-x: scroll;
+  }
+  
+  .blacklist-table {
+    min-width: 800px;
+  }
+}

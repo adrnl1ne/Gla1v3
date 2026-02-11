@@ -5,6 +5,11 @@ const AgentService = require('../services/agentService');
 const TaskService = require('../services/taskService');
 const TaskModel = require('../models/Task');
 const { config } = require('../config/env');
+const { authenticateJWT, requireRole } = require('../middleware/auth');
+const tokenBlacklistService = require('../services/tokenBlacklistService');
+const cacheService = require('../services/cacheService');
+const taskQueueService = require('../services/taskQueueService');
+const CAClient = require('../utils/caClient');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs').promises;
@@ -13,18 +18,26 @@ const path = require('path');
 const execPromise = promisify(exec);
 
 // List all agents (public)
-router.get('/', (req, res) => {
-  const agents = AgentService.getAllAgents();
-  res.json(agents);
+router.get('/', async (req, res) => {
+  try {
+    // Support both tenant_id and tenantId for backward compatibility
+    const tenantId = req.query.tenant_id || req.query.tenantId || null;
+    const agents = await AgentService.getAllAgents(tenantId);
+    res.json(agents);
+  } catch (error) {
+    console.error('[AGENTS] Error listing agents:', error);
+    res.status(500).json({ error: 'Failed to retrieve agents' });
+  }
 });
 
 // Agent beacon (mTLS authenticated)
-router.post('/beacon', (req, res) => {
+router.post('/beacon', async (req, res) => {
   try {
     const agentData = req.body;
     const clientCert = req.headers['x-forwarded-tls-client-cert'];
     const certInfo = req.headers['x-forwarded-tls-client-cert-info'];
     const agentId = req.headers['x-agent-id'];  // Read agent ID from header
+    const tenantAPIKey = req.headers['x-tenant-api-key'];  // Read tenant API key from header
     
     if (!clientCert) {
       return res.status(401).json({ error: 'Client certificate required' });
@@ -46,6 +59,40 @@ router.post('/beacon', (req, res) => {
     agentData.id = agentId || agentData.id;
     agentData.cn = cn;
     
+    // Determine tenant ID from API key or use default
+    let tenantId = null;
+    if (tenantAPIKey) {
+      // Check cache first
+      tenantId = await cacheService.getTenantByApiKey(tenantAPIKey);
+      
+      if (!tenantId) {
+        const TenantModel = require('../models/Tenant');
+        const tenant = await TenantModel.findByApiKey(tenantAPIKey);
+        if (tenant) {
+          tenantId = tenant.id;
+          // Cache for future lookups
+          await cacheService.cacheTenantApiKey(tenantAPIKey, tenantId);
+          console.log(`[BEACON] Agent ${agentData.id} identified with tenant: ${tenant.name}`);
+        } else {
+          console.log(`[BEACON] Invalid tenant API key provided, using default tenant`);
+        }
+      }
+    }
+    
+    // CHECK BLACKLIST - Reject if agent is compromised
+    if (agentData.id && tenantId) {
+      const isBlacklisted = await tokenBlacklistService.isAgentBlacklisted(agentData.id, tenantId);
+      if (isBlacklisted) {
+        const blacklistInfo = await tokenBlacklistService.getBlacklistInfo(agentData.id, tenantId);
+        console.log(`🚫 [BEACON] BLOCKED - Agent ${agentData.id} is blacklisted: ${blacklistInfo?.reason || 'Unknown'}`);
+        return res.status(403).json({ 
+          error: 'Agent access revoked', 
+          reason: blacklistInfo?.reason || 'Compromised',
+          blacklistedAt: blacklistInfo?.blacklistedAt
+        });
+      }
+    }
+    
     // Determine IP (prefer publicIp from agent, fallback to x-forwarded-for)
     const providedPublic = agentData.publicIp ? String(agentData.publicIp).trim() : null;
     const ipHeader = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString();
@@ -53,12 +100,29 @@ router.post('/beacon', (req, res) => {
     const ipNorm = String(ipRaw).split(',')[0].trim().replace(/^.*:/, '');
     agentData.ip = ipNorm;
     
-    const agent = AgentService.handleBeacon(agentData, clientCert);
+    const agent = await AgentService.handleBeacon(agentData, clientCert, tenantId);
     
-    // Get pending tasks for this agent
-    const pendingTasks = TaskService.getPendingTasks(agent.id);
+    // Cache agent status for quick lookups
+    await cacheService.cacheAgentStatus(agent.id, {
+      lastSeen: agent.last_seen,
+      status: agent.status,
+      ip: agent.ip_address
+    }, agent.tenant_id);
     
-    console.log(`[BEACON] Agent ${agent.id} (${agent.cn}) checked in - IP: ${agent.ip} - ${pendingTasks.length} pending task(s)`);
+    // Get pending tasks from Redis queue (fallback to SQL if Redis fails)
+    let pendingTasks = [];
+    try {
+      pendingTasks = await taskQueueService.getPendingTasks(agent.id, agent.tenant_id);
+      if (pendingTasks.length === 0) {
+        // Fallback to SQL
+        pendingTasks = await TaskService.getPendingTasks(agent.id);
+      }
+    } catch (err) {
+      console.warn('[BEACON] Redis queue unavailable, using SQL fallback:', err.message);
+      pendingTasks = await TaskService.getPendingTasks(agent.id);
+    }
+    
+    console.log(`[BEACON] Agent ${agent.id} (${agent.cn}) checked in - IP: ${agent.ip_address} - ${pendingTasks.length} pending task(s)`);
     
     res.json({
       status: 'ok',
@@ -73,20 +137,25 @@ router.post('/beacon', (req, res) => {
 });
 
 // Whoami endpoint (agent identification)
-router.post('/whoami', (req, res) => {
-  const token = req.headers['x-agent-token'];
-  
-  if (token !== config.agentWhoamiToken) {
-    return res.status(403).json({ error: 'Invalid agent token' });
+router.post('/whoami', async (req, res) => {
+  try {
+    const token = req.headers['x-agent-token'];
+    
+    if (token !== config.agentWhoamiToken) {
+      return res.status(403).json({ error: 'Invalid agent token' });
+    }
+    
+    const agentData = req.body;
+    const agent = await AgentService.handleBeacon(agentData, '');
+    
+    res.json({
+      agentId: agent.id,
+      message: 'Agent registered'
+    });
+  } catch (err) {
+    console.error('Whoami error:', err);
+    res.status(500).json({ error: 'Registration failed' });
   }
-  
-  const agentData = req.body;
-  const agent = AgentService.handleBeacon(agentData, '');
-  
-  res.json({
-    agentId: agent.id,
-    message: 'Agent registered'
-  });
 });
 
 // Build custom agent endpoint
@@ -94,6 +163,23 @@ router.post('/build-custom', async (req, res) => {
   console.log('[BUILD-CUSTOM] Handler called with body:', req.body);
   
   try {
+    const tenantId = req.body.tenantId;
+    
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenantId is required' });
+    }
+    
+    // Fetch tenant to get API key
+    const TenantModel = require('../models/Tenant');
+    const tenant = await TenantModel.findById(tenantId);
+    
+    if (!tenant) {
+      return res.status(404).json({ error: 'Tenant not found' });
+    }
+    
+    const tenantAPIKey = tenant.api_key;
+    console.log(`[BUILD-CUSTOM] Building agent for tenant: ${tenant.name}`);
+    
     // Map frontend parameters
     const os = req.body.targetOS;
     const arch = req.body.targetArch;
@@ -140,7 +226,8 @@ router.post('/build-custom', async (req, res) => {
       `-X 'gla1ve/agent/pkg/config.EmbeddedTasks=${escapeLdflags(tasksJSON)}'`,
       `-X 'gla1ve/agent/pkg/config.EmbeddedCACert=${caCert.replace(/\n/g, '\\n')}'`,
       `-X 'gla1ve/agent/pkg/config.EmbeddedCert=${clientCert.replace(/\n/g, '\\n')}'`,
-      `-X 'gla1ve/agent/pkg/config.EmbeddedKey=${clientKey.replace(/\n/g, '\\n')}'`
+      `-X 'gla1ve/agent/pkg/config.EmbeddedKey=${clientKey.replace(/\n/g, '\\n')}'`,
+      `-X 'gla1ve/agent/pkg/config.TenantAPIKey=${tenantAPIKey}'`
     ].join(' ');
     
     // Build using absolute paths, CGO_ENABLED=0, and cwd option
@@ -395,6 +482,189 @@ router.post('/:agentId/tasks/:taskId/result', (req, res) => {
   } catch (err) {
     console.error('[TASK] Result update error:', err);
     res.status(500).json({ error: 'Failed to update task result' });
+  }
+});
+
+// Reassign agent to different tenant (admin only)
+router.put('/:agentId/tenant', authenticateJWT, requireRole('admin'), async (req, res) => {
+  try {
+    const { agentId } = req.params;
+    const { tenantId } = req.body;
+    
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenantId is required' });
+    }
+    
+    // Verify tenant exists
+    const TenantModel = require('../models/Tenant');
+    const tenant = await TenantModel.findById(tenantId);
+    
+    if (!tenant) {
+      return res.status(404).json({ error: 'Tenant not found' });
+    }
+    
+    // Verify agent exists
+    const AgentModel = require('../models/Agent');
+    const existingAgent = await AgentModel.findById(agentId);
+    
+    if (!existingAgent) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    
+    // Reassign agent
+    const updatedAgent = await AgentModel.reassignTenant(agentId, tenantId);
+    
+    console.log(`[AGENT] Agent ${agentId} reassigned from tenant ${existingAgent.tenant_id} to ${tenantId}`);
+    
+    res.json({
+      message: 'Agent reassigned successfully',
+      agent: updatedAgent
+    });
+  } catch (err) {
+    console.error('[AGENT] Reassignment error:', err);
+    res.status(500).json({ error: 'Failed to reassign agent' });
+  }
+});
+
+// ==================== TOKEN BLACKLIST MANAGEMENT ====================
+
+// Blacklist an agent (revoke access)
+router.post('/:agentId/blacklist', authenticateJWT, requireRole('admin'), async (req, res) => {
+  try {
+    const { agentId } = req.params;
+    const { reason, ttl } = req.body;
+    
+    // Verify agent exists and get tenant info
+    const AgentModel = require('../models/Agent');
+    const agent = await AgentModel.findById(agentId);
+    
+    if (!agent) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    
+    // Blacklist the agent token
+    const result = await tokenBlacklistService.blacklistAgentToken(
+      agentId,
+      'agent-token', // Token placeholder (we use agent ID for identification)
+      reason || 'Compromised by administrator',
+      agent.tenant_id,
+      ttl
+    );
+    
+    // Revoke certificate if cert_id exists
+    if (agent.cert_id) {
+      try {
+        await CAClient.revokeCertificate(
+          agent.cert_id, 
+          'agent_blacklisted'
+        );
+        console.log(`[BLACKLIST] Certificate ${agent.cert_id} revoked for agent ${agentId}`);
+      } catch (err) {
+        console.error(`[BLACKLIST] Failed to revoke certificate ${agent.cert_id}:`, err);
+        // Continue with blacklist even if cert revocation fails
+      }
+    } else {
+      console.log(`[BLACKLIST] No cert_id found for agent ${agentId}, skipping certificate revocation`);
+    }
+    
+    // Invalidate agent cache
+    await cacheService.invalidateAgent(agentId, agent.tenant_id);
+    
+    console.log(`[BLACKLIST] Agent ${agentId} blacklisted by user ${req.user.userId}`);
+    
+    res.json({
+      message: 'Agent blacklisted successfully',
+      agentId,
+      ...result
+    });
+  } catch (err) {
+    console.error('[BLACKLIST] Error blacklisting agent:', err);
+    res.status(500).json({ error: 'Failed to blacklist agent' });
+  }
+});
+
+// Remove agent from blacklist (restore access)
+router.delete('/:agentId/blacklist', authenticateJWT, requireRole('admin'), async (req, res) => {
+  try {
+    const { agentId } = req.params;
+    
+    // Get agent tenant info
+    const AgentModel = require('../models/Agent');
+    const agent = await AgentModel.findById(agentId);
+    
+    if (!agent) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    
+    // Remove from blacklist
+    await tokenBlacklistService.removeFromBlacklist(agentId, agent.tenant_id);
+    
+    console.log(`[BLACKLIST] Agent ${agentId} removed from blacklist by user ${req.user.userId}`);
+    
+    res.json({
+      message: 'Agent removed from blacklist',
+      agentId
+    });
+  } catch (err) {
+    console.error('[BLACKLIST] Error removing from blacklist:', err);
+    res.status(500).json({ error: 'Failed to remove agent from blacklist' });
+  }
+});
+
+// Get blacklist status for an agent
+router.get('/:agentId/blacklist', authenticateJWT, async (req, res) => {
+  try {
+    const { agentId } = req.params;
+    
+    // Get agent tenant info
+    const AgentModel = require('../models/Agent');
+    const agent = await AgentModel.findById(agentId);
+    
+    if (!agent) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    
+    // Get blacklist info
+    const blacklistInfo = await tokenBlacklistService.getBlacklistInfo(agentId, agent.tenant_id);
+    
+    if (!blacklistInfo) {
+      return res.json({
+        blacklisted: false,
+        agentId
+      });
+    }
+    
+    res.json({
+      blacklisted: true,
+      agentId,
+      ...blacklistInfo
+    });
+  } catch (err) {
+    console.error('[BLACKLIST] Error getting blacklist status:', err);
+    res.status(500).json({ error: 'Failed to get blacklist status' });
+  }
+});
+
+// Get all blacklisted agents for current user's tenants
+router.get('/blacklist/list', authenticateJWT, async (req, res) => {
+  try {
+    const tenantId = req.query.tenant_id;
+    
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenant_id is required' });
+    }
+    
+    // Get all blacklisted agents for tenant
+    const blacklistedAgents = await tokenBlacklistService.getBlacklistedAgents(parseInt(tenantId));
+    
+    res.json({
+      tenantId: parseInt(tenantId),
+      count: blacklistedAgents.length,
+      agents: blacklistedAgents
+    });
+  } catch (err) {
+    console.error('[BLACKLIST] Error getting blacklisted agents:', err);
+    res.status(500).json({ error: 'Failed to get blacklisted agents' });
   }
 });
 

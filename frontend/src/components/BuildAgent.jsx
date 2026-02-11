@@ -2,6 +2,7 @@ import { useState } from 'react';
 import '../styles/global.css';
 import { BuildTaskModal } from './modals';
 import { getAllTasks } from './modals/TaskModal/TaskTemplates';
+import { useTenant } from '../context/TenantContext';
 
 // Convert task templates to AVAILABLE_TASKS format for BuildAgent
 const createAvailableTasks = () => {
@@ -40,12 +41,14 @@ const AVAILABLE_TASKS = createAvailableTasks();
 const CATEGORIES = ['All', 'Recon', 'Files', 'Processes', 'Commands'];
 
 export default function BuildAgent() {
+  const { tenants, activeTenant } = useTenant();
   const [formData, setFormData] = useState({
     agentId: '',
     beaconInterval: '30',
     c2Server: 'c2.gla1v3.local:4443',
     targetOS: 'linux',
     targetArch: 'amd64',
+    tenantId: activeTenant?.id || '',
     selectedTasks: []
   });
   
@@ -156,6 +159,11 @@ export default function BuildAgent() {
   };
   
   const buildAgent = async () => {
+    if (!formData.tenantId) {
+      alert('Please select a tenant');
+      return;
+    }
+    
     if (!formData.agentId.trim()) {
       alert('Please enter an Agent ID');
       return;
@@ -197,7 +205,8 @@ export default function BuildAgent() {
           beaconInterval: formData.beaconInterval + 's',
           c2Server: formData.c2Server,
           targetOS: formData.targetOS,
-          targetArch: formData.targetArch
+          targetArch: formData.targetArch,
+          tenantId: formData.tenantId
         })
       });
       
@@ -275,6 +284,23 @@ export default function BuildAgent() {
         {activeSection === 'config' && (
           <div className="form-section">
             <h3>Agent Configuration</h3>
+            
+            <div className="form-group">
+              <label>Tenant *</label>
+              <select
+                value={formData.tenantId}
+                onChange={(e) => setFormData({...formData, tenantId: e.target.value})}
+                disabled={building}
+              >
+                <option value="">Select Tenant</option>
+                {tenants.map(tenant => (
+                  <option key={tenant.id} value={tenant.id}>
+                    {tenant.name}
+                  </option>
+                ))}
+              </select>
+              <small>Which client/tenant this agent belongs to</small>
+            </div>
             
             <div className="form-group">
               <label>Agent ID *</label>

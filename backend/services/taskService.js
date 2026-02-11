@@ -2,20 +2,24 @@
 const TaskModel = require('../models/Task');
 
 class TaskService {
-  static createTask(agentId, taskData) {
-    return TaskModel.create(agentId, taskData);
+  static async createTask(agentId, taskData, tenantId, createdBy = null) {
+    return await TaskModel.create(agentId, taskData, tenantId, createdBy);
   }
   
-  static getPendingTasks(agentId) {
-    return TaskModel.getPendingForAgent(agentId);
+  static async getPendingTasks(agentId) {
+    return await TaskModel.getPendingForAgent(agentId);
   }
   
-  static getAllTasks(agentId) {
-    return TaskModel.getAllForAgent(agentId);
+  static async getAllTasks(agentId) {
+    return await TaskModel.getAllForAgent(agentId);
   }
   
-  static updateTaskResult(agentId, taskId, result, error = null) {
-    return TaskModel.updateResult(agentId, taskId, result, error);
+  static async updateTaskResult(agentId, taskId, result, error = null) {
+    return await TaskModel.updateResult(agentId, taskId, result, error);
+  }
+  
+  static async getByTenant(tenantId) {
+    return await TaskModel.getByTenant(tenantId);
   }
 }
 

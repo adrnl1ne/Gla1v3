@@ -28,47 +28,9 @@ Every component uses encryption and authentication. Agent communications use mut
 
 ## Documentation
 
-**[Getting Started Guide](docs/GETTING_STARTED.md)** - Setup and first-time configuration
-
-## Architecture at a Glance
-
-Gla1v3 consists of several containerized services working together:
-
-- **Frontend** - React-based dashboard for operator interaction
-- **Backend** - Node.js API server handling agent communication and task management
-- **CA Service** - Dynamic certificate generation for secure agent communications
-- **EDR Proxy** - Authenticated gateway to EDR systems
-- **Traefik** - Reverse proxy handling TLS termination and routing
-- **Wazuh** - Integrated EDR for threat detection
-
-All services communicate through encrypted channels with authentication required at every layer.
-
-## Security Considerations
-
-**This is a penetration testing tool**. Only use Gla1v3 in authorized environments where you have explicit permission to deploy agents and conduct security testing.
-
-### Built-in Security Features
-- Mutual TLS for all agent communications
-- JWT-based authentication with role-based access control
-- Dynamic certificate generation with automatic expiration
-- Encrypted storage of sensitive configuration
-- Comprehensive audit logging of all operations
-
-### Before Going Live
-- Change all default credentials immediately
-- Review the security documentation
-- Configure proper network segmentation
-- Enable monitoring and alerting
-- Restrict access to authorized personnel only
-
-## Technology Stack
-
-- **Frontend**: React + Vite + Leaflet for mapping
-- **Backend**: Node.js + Express
-- **Agents**: Go for cross-platform compatibility
-- **Proxy**: Traefik for advanced routing
-- **EDR**: Wazuh with OpenSearch
-- **Orchestration**: Docker Compose
+- **[Getting Started](docs/GETTING_STARTED.md)** - Setup and first-time configuration
+- **[Architecture](docs/ARCHITECTURE.md)** - System design and components
+- **[Security](docs/SECURITY.md)** - Security features and best practices
 
 ## Project Status
 

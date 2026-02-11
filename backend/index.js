@@ -16,6 +16,7 @@ const { authenticateJWT } = require('./middleware/auth');
 const AuthService = require('./services/authService');
 const EDRService = require('./services/edrService');
 const WazuhIndexer = require('./utils/wazuhIndexer');
+const redisClient = require('./utils/redisClient');
 
 // Routes
 const authRoutes = require('./routes/auth');
@@ -23,15 +24,24 @@ const agentRoutes = require('./routes/agents');
 const taskRoutes = require('./routes/tasks');
 const edrRoutes = require('./routes/edr');
 const buildRoutes = require('./routes/build');
+const tenantRoutes = require('./routes/tenants');
+const userRoutes = require('./routes/users');
 
 // Validate environment secrets
 validateSecrets();
 
 // Initialize services
 (async () => {
-  await AuthService.initializeDefaultAdmin();
-  EDRService.initialize();
-  WazuhIndexer.startIndexer();
+  try {
+    await redisClient.connect();
+    await AuthService.initializeDefaultAdmin();
+    EDRService.initialize();
+    WazuhIndexer.startIndexer();
+    console.log('✅ All services initialized');
+  } catch (err) {
+    console.error('❌ Error initializing services:', err);
+    process.exit(1);
+  }
 })();
 
 // Express apps
@@ -87,6 +97,8 @@ app.get('/api/agents/download/:filename', authenticateJWT, (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/agents', agentRoutes);
 app.use('/api/tasks', taskRoutes);
+app.use('/api/tenants', tenantRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api', edrRoutes); // /api/alerts/*, /api/edr-configs/*
 app.use('/api/build', buildRoutes);
 
@@ -101,6 +113,19 @@ app.listen(PORT, () => {
   console.log(`✅ Backend API running on port ${PORT}`);
   console.log(`   Environment: ${config.env}`);
   console.log(`   Domain: ${config.domain}`);
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('🛑 SIGTERM received, shutting down gracefully...');
+  await redisClient.disconnect();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('🛑 SIGINT received, shutting down gracefully...');
+  await redisClient.disconnect();
+  process.exit(0);
+});
+
 });
 
 // C2 Server (plain HTTP - Traefik handles mTLS termination)

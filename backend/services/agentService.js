@@ -1,15 +1,26 @@
 // Agent Service
 const AgentModel = require('../models/Agent');
+const TenantModel = require('../models/Tenant');
 const { config } = require('../config/env');
 
 class AgentService {
-  static handleBeacon(agentData, clientCert) {
+  static async handleBeacon(agentData, clientCert, tenantId = null) {
     const agentId = agentData.id || this.extractCNFromCert(clientCert);
     
-    let agent = AgentModel.findById(agentId);
+    let agent = await AgentModel.findById(agentId);
     
     if (!agent) {
-      agent = AgentModel.register({
+      // If no tenant specified, use default tenant
+      if (!tenantId) {
+        const defaultTenant = await TenantModel.getDefault();
+        tenantId = defaultTenant ? defaultTenant.id : null;
+      }
+      
+      if (!tenantId) {
+        throw new Error('No tenant available for agent registration');
+      }
+      
+      agent = await AgentModel.register({
         id: agentId,
         cn: agentData.cn || this.extractCNFromCert(clientCert),
         hostname: agentData.hostname,
@@ -17,27 +28,27 @@ class AgentService {
         arch: agentData.arch,
         user: agentData.user,
         ip: agentData.ip
-      });
+      }, tenantId);
     } else {
-      AgentModel.update(agentId, {
+      agent = await AgentModel.update(agentId, {
         cn: agentData.cn || agent.cn || this.extractCNFromCert(clientCert),
         hostname: agentData.hostname,
         os: agentData.os,
         arch: agentData.arch,
-        user: agentData.user,
-        ip: agentData.ip
+        username: agentData.user,
+        ip_address: agentData.ip
       });
     }
     
     return agent;
   }
   
-  static getAllAgents() {
-    return AgentModel.getAll();
+  static async getAllAgents(tenantId = null) {
+    return await AgentModel.getAll(tenantId);
   }
   
-  static getAgent(agentId) {
-    return AgentModel.findById(agentId);
+  static async getAgent(agentId) {
+    return await AgentModel.findById(agentId);
   }
   
   static extractCNFromCert(pem) {

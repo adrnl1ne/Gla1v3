@@ -1,10 +1,13 @@
 import { useState } from 'react';
+import TwoFactorVerify from './modals/TwoFactorVerify';
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [show2FA, setShow2FA] = useState(false);
+  const [tempToken, setTempToken] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -24,7 +27,15 @@ export default function Login({ onLogin }) {
       }
 
       const data = await res.json();
-      onLogin(data);
+      
+      // Check if 2FA is required
+      if (data.requires2FA) {
+        setTempToken(data.tempToken);
+        setShow2FA(true);
+        setLoading(false);
+      } else {
+        onLogin(data);
+      }
     } catch (err) {
       console.error('Login error:', err);
       setError(err.message);
@@ -32,61 +43,73 @@ export default function Login({ onLogin }) {
     }
   };
 
+  const handle2FASuccess = (data) => {
+    setShow2FA(false);
+    onLogin(data);
+  };
+
+  const handle2FACancel = () => {
+    setShow2FA(false);
+    setTempToken('');
+    setPassword('');
+  };
+
   return (
-    <div style={{ 
-      height: '100vh', 
-      width: '100vw', 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
-      background: 'linear-gradient(135deg, #0d1117 0%, #1a1e2e 100%)',
-      position: 'fixed',
-      top: 0,
-      left: 0
-    }}>
+    <>
       <div style={{ 
-        width: '100%', 
-        maxWidth: 420, 
-        background: '#161b22', 
-        borderRadius: 12, 
-        padding: '3rem',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-        border: '1px solid #30363d'
+        height: '100vh', 
+        width: '100vw', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        background: 'linear-gradient(135deg, #0d1117 0%, #1a1e2e 100%)',
+        position: 'fixed',
+        top: 0,
+        left: 0
       }}>
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <h1 style={{ 
-            margin: 0, 
-            color: '#58a6ff', 
-            fontSize: '2.5rem',
-            fontFamily: 'monospace',
-            letterSpacing: 2
-          }}>
-            GLA1V3
-          </h1>
-          <p style={{ 
-            margin: '0.5rem 0 0', 
-            color: '#8b949e', 
-            fontSize: '0.9rem' 
-          }}>
-            Command & Control Framework
-          </p>
-        </div>
-
-        {error && (
-          <div style={{ 
-            background: '#3d1f1f', 
-            border: '1px solid #f85149', 
-            borderRadius: 6, 
-            padding: '1rem',
-            marginBottom: '1.5rem',
-            color: '#f85149',
-            fontSize: '0.9rem'
-          }}>
-            <strong>Error:</strong> {error}
+        <div style={{ 
+          width: '100%', 
+          maxWidth: 420, 
+          background: '#161b22', 
+          borderRadius: 12, 
+          padding: '3rem',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          border: '1px solid #30363d'
+        }}>
+          <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+            <h1 style={{ 
+              margin: 0, 
+              color: '#58a6ff', 
+              fontSize: '2.5rem',
+              fontFamily: 'monospace',
+              letterSpacing: 2
+            }}>
+              GLA1V3
+            </h1>
+            <p style={{ 
+              margin: '0.5rem 0 0', 
+              color: '#8b949e', 
+              fontSize: '0.9rem' 
+            }}>
+              Command & Control Framework
+            </p>
           </div>
-        )}
 
-        <form onSubmit={handleSubmit}>
+          {error && (
+            <div style={{ 
+              background: '#3d1f1f', 
+              border: '1px solid #f85149', 
+              borderRadius: 6, 
+              padding: '1rem',
+              marginBottom: '1.5rem',
+              color: '#f85149',
+              fontSize: '0.9rem'
+            }}>
+              <strong>Error:</strong> {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '1.5rem' }}>
             <label style={{ 
               display: 'block', 
@@ -172,13 +195,22 @@ export default function Login({ onLogin }) {
           textAlign: 'center'
         }}>
           <div style={{ color: '#8b949e', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
-            🔒 Secured with JWT + mTLS
-          </div>
-          <div style={{ color: '#6b6f74', fontSize: '0.75rem' }}>
-            Default credentials: admin / admin
+              🔒 Secured with JWT + 2FA + mTLS
+            </div>
+            <div style={{ color: '#6b6f74', fontSize: '0.75rem' }}>
+              Default credentials: admin / admin
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      {show2FA && (
+        <TwoFactorVerify
+          tempToken={tempToken}
+          onSuccess={handle2FASuccess}
+          onCancel={handle2FACancel}
+        />
+      )}
+    </>
   );
 }

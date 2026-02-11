@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Splash from './components/Splash';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
+import { TenantProvider } from './context/TenantContext';
 
 function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -57,7 +58,11 @@ function App() {
     return <Login onLogin={handleLogin} />;
   }
 
-  return <Dashboard user={user} token={token} onLogout={handleLogout} />;
+  return (
+    <TenantProvider user={user} token={token}>
+      <Dashboard user={user} token={token} onLogout={handleLogout} />
+    </TenantProvider>
+  );
 }
 
 export default App;

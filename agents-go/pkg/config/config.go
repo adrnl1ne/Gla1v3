@@ -13,6 +13,7 @@ var (
 	EmbeddedCACert = ""                     // PEM encoded CA certificate
 	EmbeddedCert   = ""                     // PEM encoded client certificate
 	EmbeddedKey    = ""                     // PEM encoded client key
+	TenantAPIKey   = ""                     // Tenant API key for multi-tenant support
 )
 
 // Config holds the runtime configuration for the agent
@@ -23,6 +24,7 @@ type Config struct {
 	ServerName     string
 	APIServerName  string
 	WhoamiToken    string
+	TenantAPIKey   string
 	
 	// Certificate paths (for file-based certs)
 	CertPath string
@@ -77,6 +79,12 @@ func Load() *Config {
 	}
 	
 	cfg.BeaconInterval = beaconInterval
+	
+	// Set tenant API key from build-time or env var
+	cfg.TenantAPIKey = TenantAPIKey
+	if v := os.Getenv("TENANT_API_KEY"); v != "" {
+		cfg.TenantAPIKey = v
+	}
 	
 	// Check for embedded certificates
 	cfg.HasEmbeddedCerts = (EmbeddedCert != "" && EmbeddedKey != "" && EmbeddedCACert != "")
