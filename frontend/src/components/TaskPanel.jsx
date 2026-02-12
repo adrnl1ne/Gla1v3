@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { TaskModal } from './modals';
+import { getTaskById } from './modals/TaskModal/TaskTemplates';
 
 export default function TaskPanel({ agent, token, onClose }) {
   const [cmd, setCmd] = useState('');
@@ -301,10 +302,20 @@ export default function TaskPanel({ agent, token, onClose }) {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                         <div style={{ fontFamily: 'monospace', color: '#79c0ff', fontSize: '0.9rem' }}>
                           {task.type === 'embedded' ? (
-                            <span>
-                              <span style={{ background: '#6e40c9', color: '#fff', padding: '2px 6px', borderRadius: 3, fontSize: '0.75rem', marginRight: '0.5rem' }}>EMBEDDED</span>
-                              {task.taskType}
-                            </span>
+                            (() => {
+                              const tpl = getTaskById(task.embeddedType || task.taskType);
+                              return (
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <span style={{ background: '#6e40c9', color: '#fff', padding: '2px 6px', borderRadius: 3, fontSize: '0.75rem' }}>EMBEDDED</span>
+                                    <strong style={{ color: '#79c0ff' }}>{tpl ? tpl.label : (task.embeddedType || task.taskType)}</strong>
+                                  </div>
+                                  {tpl && tpl.description && (
+                                    <div style={{ color: '#8b949e', fontSize: '0.85rem', marginTop: '0.25rem' }}>{tpl.description}</div>
+                                  )}
+                                </div>
+                              );
+                            })()
                           ) : (
                             <span>{task.cmd} {getArgsString(task)}</span>
                           )}

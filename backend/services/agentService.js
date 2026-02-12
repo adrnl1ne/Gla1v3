@@ -67,7 +67,15 @@ class AgentService {
   }
   
   static async getAgent(agentId) {
-    return await AgentModel.findById(agentId);
+    // Try UUID lookup first
+    let agent = await AgentModel.findById(agentId);
+
+    // If not found and agentId doesn't look like a UUID, try CN lookup
+    if (!agent && !agentId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      agent = await AgentModel.findByCN(agentId);
+    }
+
+    return agent;
   }
   
   static extractCNFromCert(pem) {

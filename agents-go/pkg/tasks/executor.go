@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"gla1ve/agent/pkg/config"
 )
 
 // Task represents a task to execute on the agent
@@ -240,6 +242,12 @@ func (e *Executor) SendEmbeddedResults(results []TaskResult, c2Server string) {
 	
 	req, _ := http.NewRequest("POST", resultURL, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+
+	// Include tenant API key when available so backend can accept results in environments
+	// where Traefik does not forward the client certificate header.
+	if config.TenantAPIKey != "" {
+		req.Header.Set("x-tenant-api-key", config.TenantAPIKey)
+	}
 	
 	resp, err := e.apiClient.Do(req)
 	if err != nil {

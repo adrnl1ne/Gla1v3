@@ -86,11 +86,15 @@ class TaskModel {
   }
   
   static async updateStatus(taskId, status) {
+    // Build SET clause dynamically to avoid trailing commas when optional fields
+    const sets = ["status = $1"];
+    if (status === 'running') sets.push('executed_at = NOW()');
+    if (status === 'completed' || status === 'failed') sets.push('completed_at = NOW()');
+
+    const setClause = sets.join(', ');
+
     const result = await query(
-      `UPDATE tasks SET status = $1, 
-       ${status === 'running' ? 'executed_at = NOW()' : ''}
-       ${status === 'completed' || status === 'failed' ? 'completed_at = NOW()' : ''}
-       WHERE id = $2 RETURNING *`,
+      `UPDATE tasks SET ${setClause} WHERE id = $2 RETURNING *`,
       [status, taskId]
     );
     return result.rows[0] || null;

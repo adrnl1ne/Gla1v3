@@ -37,8 +37,35 @@ if (Test-Path "$PSScriptRoot\db\.env") {
 } else {
     @"
 # PostgreSQL Configuration
+# Generate a secure password by running: openssl rand -base64 32
 DB_PASSWORD=$dbPassword
+BACKUP_KEEP_DAYS=7
 "@ | Out-File -FilePath "$PSScriptRoot\db\.env" -Encoding ASCII -NoNewline
+}
+
+# Sync DB_PASSWORD to root .env for backend
+$rootEnvPath = "$PSScriptRoot\..\.env"
+if (Test-Path $rootEnvPath) {
+    $rootEnvContent = Get-Content $rootEnvPath -Raw
+    $rootEnvContent = $rootEnvContent -replace "DB_PASSWORD=.+", "DB_PASSWORD=$dbPassword"
+    $rootEnvContent | Out-File -FilePath $rootEnvPath -Encoding ASCII -NoNewline
+} else {
+    @"
+# Backend Database Configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=gla1v3
+DB_USER=gla1v3_api
+DB_PASSWORD=$dbPassword
+
+# JWT Configuration
+JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+JWT_EXPIRES_IN=7d
+
+# Server Configuration
+PORT=3000
+NODE_ENV=development
+"@ | Out-File -FilePath $rootEnvPath -Encoding ASCII -NoNewline
 }
 
 Write-Host ""

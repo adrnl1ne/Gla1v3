@@ -90,6 +90,7 @@ CREATE TABLE agents (
     cert_issued_at TIMESTAMPTZ,
     cert_expiry TIMESTAMPTZ,
     cert_status TEXT DEFAULT 'active' CHECK (cert_status IN ('active', 'revoked', 'expired', 'pending')),
+    cert_id TEXT,
     
     -- Status
     status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'compromised', 'removed')),
@@ -107,6 +108,28 @@ CREATE INDEX idx_agents_hostname ON agents(tenant_id, hostname);
 CREATE INDEX idx_agents_last_seen ON agents(tenant_id, last_seen DESC);
 CREATE INDEX idx_agents_cert_status ON agents(cert_status) WHERE cert_status != 'active';
 CREATE INDEX idx_agents_cert_expiry ON agents(cert_expiry) WHERE cert_expiry IS NOT NULL;
+CREATE INDEX idx_agents_cert_id ON agents(cert_id) WHERE cert_id IS NOT NULL;
+
+COMMENT ON COLUMN agents.cert_id IS 'Certificate ID from CA service for dynamic cert management';
+
+-- ============================================================================
+-- AGENT BLACKLIST (Revoked agent access)
+-- ============================================================================
+CREATE TABLE agent_blacklist (
+    agent_id UUID NOT NULL,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    reason TEXT,
+    expires_at TIMESTAMPTZ,
+    blacklisted_at TIMESTAMPTZ DEFAULT NOW(),
+    revoked BOOLEAN DEFAULT false,
+    PRIMARY KEY (agent_id, tenant_id)
+);
+
+CREATE INDEX idx_agent_blacklist_tenant ON agent_blacklist(tenant_id);
+CREATE INDEX idx_agent_blacklist_expires ON agent_blacklist(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX idx_agent_blacklist_revoked ON agent_blacklist(revoked);
+
+COMMENT ON TABLE agent_blacklist IS 'Blacklisted agents that are denied access to the C2 server';
 
 -- ============================================================================
 -- TASKS (Commands to execute on agents)

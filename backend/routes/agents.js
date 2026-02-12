@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const AgentService = require('../services/agentService');
+const AgentModel = require('../models/Agent');
 const TaskService = require('../services/taskService');
 const TaskModel = require('../models/Task');
 const ResultModel = require('../models/Result');
@@ -10,6 +11,7 @@ const { authenticateJWT, requireRole } = require('../middleware/auth');
 const tokenBlacklistService = require('../services/tokenBlacklistService');
 const cacheService = require('../services/cacheService');
 const taskQueueService = require('../services/taskQueueService');
+const redisClient = require('../utils/redisClient');
 const CAClient = require('../utils/caClient');
 const { exec } = require('child_process');
 const { promisify } = require('util');
@@ -90,6 +92,43 @@ function mapTaskForAgent(task) {
   };
 
   return normalized;
+}
+
+// Execute embedded task on backend
+async function executeEmbeddedTask(task) {
+  const taskType = task.taskType || task.embedded_type;
+  const params = task.params || {};
+
+  switch (taskType) {
+    case 'sys_info':
+      const os = require('os');
+      return JSON.stringify({
+        os: os.platform(),
+        arch: os.arch(),
+        hostname: os.hostname(),
+        os_version: os.release(),
+        kernel: os.version(),
+        cpus: os.cpus().length,
+        total_memory: os.totalmem(),
+        free_memory: os.freemem()
+      });
+    case 'priv_check':
+      return JSON.stringify({
+        is_root: process.getuid ? process.getuid() === 0 : false,
+        user: process.env.USER || process.env.USERNAME || 'unknown'
+      });
+    case 'cmd':
+      const command = params.command;
+      if (!command) return 'No command provided';
+      try {
+        const { stdout, stderr } = await execPromise(command, { timeout: 30000 });
+        return stdout || stderr;
+      } catch (err) {
+        return `Error: ${err.message}`;
+      }
+    default:
+      return `Unknown embedded task type: ${taskType}`;
+  }
 }
 
 // List all agents (public)
@@ -196,12 +235,41 @@ router.post('/beacon', async (req, res) => {
     
     // Get pending tasks from Redis queue (fallback to SQL if Redis fails)
     let pendingTasks = [];
+    let tasksFromRedis = false;
     try {
-      pendingTasks = await taskQueueService.getPendingTasks(agent.id, agent.tenant_id);
-      if (pendingTasks.length === 0) {
-        // Fallback to SQL
-        pendingTasks = await TaskService.getPendingTasks(agent.id);
+      const queueKey = redisClient.getKey('queue:agent', agent.id, agent.tenant_id);
+      const processingKey = redisClient.getKey('processing:agent', agent.id, agent.tenant_id);
+      
+      // Get all tasks from queue
+      const taskDatas = await redisClient.lRange(queueKey, 0, -1);
+      
+      for (const taskData of taskDatas) {
+        const task = JSON.parse(taskData);
+        const taskId = task.id || task.task_id;
+        
+        // Move to processing
+        await redisClient.hSet(processingKey, taskId, JSON.stringify({
+          task,
+          dequeuedAt: new Date().toISOString()
+        }));
+        
+        // Update task status to 'sent' in database
+        try {
+          await TaskModel.updateStatus(taskId, 'sent');
+        } catch (statusErr) {
+          console.warn(`[BEACON] Failed to update task ${taskId} status to sent:`, statusErr.message);
+        }
+        
+        pendingTasks.push(task);
       }
+      
+      // Clear the queue
+      if (taskDatas.length > 0) {
+        await redisClient.del(queueKey);
+        await redisClient.expire(processingKey, 3600); // 1 hour processing timeout
+        tasksFromRedis = true;
+      }
+      
     } catch (err) {
       console.warn('[BEACON] Redis queue unavailable, using SQL fallback:', err.message);
       pendingTasks = await TaskService.getPendingTasks(agent.id);
@@ -210,9 +278,12 @@ router.post('/beacon', async (req, res) => {
     console.log(`[BEACON] Agent ${agent.id} (${agent.cn}) checked in - IP: ${agent.ip_address} - ${pendingTasks.length} pending task(s)`);
 
     // Normalize tasks into the shape expected by the Go agent
-    const tasksForAgent = pendingTasks
-      .map(mapTaskForAgent)
-      .filter((t) => t && (t.cmd || t.type === 'embedded'));
+    // Tasks from Redis are already normalized, tasks from SQL need normalization
+    const tasksForAgent = tasksFromRedis 
+      ? pendingTasks.filter((t) => t && (t.cmd || t.type === 'embedded'))
+      : pendingTasks
+          .map(mapTaskForAgent)
+          .filter((t) => t && (t.cmd || t.type === 'embedded'));
 
     // DEBUG: log the exact tasks payload returned to agents (helps diagnose legacy/compat issues)
     if (tasksForAgent.length > 0) {
@@ -466,20 +537,54 @@ router.get('/download/:filename', async (req, res) => {
 router.post('/:agentId/embedded-tasks', async (req, res) => {
   const { agentId } = req.params;
   const { results } = req.body;
+  const clientCert = req.headers['x-forwarded-tls-client-cert'];
+  const tenantApiKeyHeader = req.headers['x-tenant-api-key'] || req.headers['x-tenant-api-key'.toLowerCase()];
   
   if (!results || !Array.isArray(results)) {
     return res.status(400).json({ error: 'Missing results array' });
   }
-  
+
+  // Authentication: prefer mTLS client cert (Traefik header). As a controlled fallback for
+  // development/local scenarios where Traefik may not forward the cert, allow the agent to
+  // authenticate with a valid tenant API key + agentId match.
+  let agent = null;
+  if (clientCert) {
+    // Extract CN from client certificate to properly identify the agent
+    const cn = AgentService.extractCNFromCert(clientCert);
+    // Find agent by CN instead of relying on agentId parameter
+    agent = await AgentModel.findByCN(cn);
+    if (!agent) {
+      console.log(`[EmbeddedTasks] Agent not found for CN: ${cn}, skipping persistence`);
+      return res.json({ success: true, received: results.length, processed: 0 });
+    }
+  } else if (tenantApiKeyHeader) {
+    // Fallback: validate tenant API key and agentId pairing (development convenience only)
+    try {
+      const TenantModel = require('../models/Tenant');
+      const tenant = await TenantModel.findByApiKey(tenantApiKeyHeader);
+      if (!tenant) {
+        return res.status(401).json({ error: 'Invalid tenant API key' });
+      }
+      // Look up agent by provided agentId and ensure it belongs to the tenant
+      const maybeAgent = await AgentModel.findById(agentId);
+      if (!maybeAgent || maybeAgent.tenant_id !== tenant.id) {
+        return res.status(401).json({ error: 'Agent not associated with provided tenant API key' });
+      }
+      agent = maybeAgent;
+      console.warn(`[EmbeddedTasks] Using tenant-API-key fallback to authenticate embedded results for agent ${agentId}`);
+    } catch (fallbackErr) {
+      console.error('[EmbeddedTasks] Tenant API key fallback error:', fallbackErr.message);
+      return res.status(401).json({ error: 'Authentication failed' });
+    }
+  } else {
+    return res.status(401).json({ error: 'Client certificate required' });
+  }
+
   console.log(`[EmbeddedTasks] Received ${results.length} task results from agent: ${agentId}`);
   
   try {
-    // Persist embedded-task results so they appear in the UI/history.
-    // For each embedded result we create a completed `tasks` row and attach a `results` row.
-    const agent = await AgentService.getAgent(agentId);
-    const tenantId = agent ? agent.tenant_id : null;
-    // Prefer resolved UUID when persisting tasks/results (agentId param may be CN). Fallback to param.
-    const resolvedAgentId = agent && agent.id ? agent.id : agentId;
+    const tenantId = agent.tenant_id;
+    const resolvedAgentId = agent.id;
 
     let processedCount = 0;
 
@@ -514,22 +619,53 @@ router.post('/:agentId/embedded-tasks', async (req, res) => {
         console.log(`[EmbeddedTasks] Agent ${agentId} ${taskType}: ${String(output).substring(0, 100)}${String(output).length > 100 ? '...' : ''}`);
       }
 
-      // Persist a task row (embedded, runOnce) and immediately mark it complete with the result
-      try {
-        const createdTask = await TaskModel.create(resolvedAgentId, {
-          type: 'embedded',
-          taskType: taskType,
-          params: params,
-          runOnce: true
-        }, tenantId, null);
+      // Only persist if agent exists with valid UUID (skip for test/demo agents without UUID)
+      if (agent && agent.id) {
+        try {
+          // Try to find an existing pending/sent embedded task created by the dashboard/task-builder
+          // that matches this agent, embedded_type and params. If found, update that task's result
+          // instead of creating a duplicate task row. This prevents the UI from showing two entries
+          // (one 'sent' and a second persisted embedded-result) and preserves the original task's
+          // embedded_type so the TaskTemplates description renders correctly.
+          let targetTask = null;
 
-        // Use the existing updateResult flow to insert a result and mark completed
-        await TaskModel.updateResult(resolvedAgentId, createdTask.id, output, errMsg);
+          try {
+            const allTasks = await TaskModel.getAllForAgent(resolvedAgentId);
+            targetTask = allTasks.find(t => (
+              (t.embedded_type === taskType) &&
+              (t.status === 'pending' || t.status === 'sent') &&
+              JSON.stringify(t.embedded_params || {}) === JSON.stringify(params || {})
+            ));
+          } catch (lookupErr) {
+            // If lookup fails, fall back to creating a new task (best-effort)
+            console.warn('[EmbeddedTasks] Failed to lookup existing task for result — will create new one:', lookupErr.message);
+          }
 
-        processedCount++;
-      } catch (dbErr) {
-        console.error(`[EmbeddedTasks] Failed to persist embedded result for ${taskType}:`, dbErr.message);
-        // continue processing remaining results
+          if (targetTask) {
+            // Attach result to the existing pending task
+            await TaskModel.updateResult(resolvedAgentId, targetTask.id, output, errMsg);
+            console.log(`[EmbeddedTasks] Attached result to existing task ${targetTask.id} (type: ${taskType})`);
+          } else {
+            // No matching pending task — create a new persisted embedded task
+            const createdTask = await TaskModel.create(resolvedAgentId, {
+              type: 'embedded',
+              taskType: taskType,
+              params: params,
+              runOnce: true
+            }, tenantId, null);
+
+            // Use the existing updateResult flow to insert a result and mark completed
+            await TaskModel.updateResult(resolvedAgentId, createdTask.id, output, errMsg);
+            console.log(`[EmbeddedTasks] Created new persisted task ${createdTask.id} for embedded result (type: ${taskType})`);
+          }
+
+          processedCount++;
+        } catch (dbErr) {
+          console.error(`[EmbeddedTasks] Failed to persist embedded result for ${taskType}:`, dbErr.message);
+          // continue processing remaining results
+        }
+      } else {
+        console.log(`[EmbeddedTasks] Skipping persistence for unregistered agent: ${agentId}`);
       }
     }
 

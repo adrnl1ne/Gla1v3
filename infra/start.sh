@@ -19,8 +19,32 @@ if [ -f "$(dirname "$0")/db/.env" ]; then
 else
     cat > "$(dirname "$0")/db/.env" <<EOF
 # PostgreSQL Configuration
+# Generate a secure password by running: openssl rand -base64 32
 DB_PASSWORD=$DB_PASSWORD
 BACKUP_KEEP_DAYS=7
+EOF
+fi
+
+# Sync DB_PASSWORD to root .env for backend
+ROOT_ENV="$(dirname "$0")/../.env"
+if [ -f "$ROOT_ENV" ]; then
+    sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" "$ROOT_ENV"
+else
+    cat > "$ROOT_ENV" <<EOF
+# Backend Database Configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=gla1v3
+DB_USER=gla1v3_api
+DB_PASSWORD=$DB_PASSWORD
+
+# JWT Configuration
+JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+JWT_EXPIRES_IN=7d
+
+# Server Configuration
+PORT=3000
+NODE_ENV=development
 EOF
 fi
 

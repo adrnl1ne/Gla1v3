@@ -79,20 +79,22 @@ BEGIN
     -- Mark tasks as sent and return them atomically
     -- This prevents returning the same task multiple times
     RETURN QUERY
-    UPDATE tasks
-    SET status = 'sent', sent_at = NOW()
-    WHERE agent_id = agent_uuid
-    AND status = 'pending'
-    RETURNING
-        id,
-        task_type,
-        command,
-        args,
-        embedded_type,
-        embedded_params,
-        run_once,
-        created_at
-    ORDER BY created_at ASC;
+    WITH updated_tasks AS (
+        UPDATE tasks
+        SET status = 'sent', sent_at = NOW()
+        WHERE agent_id = agent_uuid
+        AND status = 'pending'
+        RETURNING
+            tasks.id,
+            tasks.task_type,
+            tasks.command,
+            tasks.args,
+            tasks.embedded_type,
+            tasks.embedded_params,
+            tasks.run_once,
+            tasks.created_at
+    )
+    SELECT * FROM updated_tasks ORDER BY created_at ASC;
 END;
 $$ LANGUAGE plpgsql;
 
