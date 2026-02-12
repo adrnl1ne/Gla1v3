@@ -14,11 +14,14 @@ router.get('/recent', async (req, res) => {
     const limit = parseInt(req.query.limit) || 100;
     const tenantId = req.query.tenant_id;
     
+    console.log(`[TASKS] /recent endpoint called with tenantId: ${tenantId}, limit: ${limit}`);
+    
     let tasks = await TaskModel.getAll(tenantId);
     
     // Apply limit
     tasks = tasks.slice(0, limit);
     
+    console.log(`[TASKS] /recent returning ${tasks.length} tasks`);
     res.json(tasks);
   } catch (err) {
     console.error('Error getting recent tasks:', err);
@@ -64,10 +67,19 @@ router.post('/', auditAction('create_task'), async (req, res) => {
 router.get('/pending/:agentId', async (req, res) => {
   try {
     const { agentId } = req.params;
+    
+    // Prevent "recent" from being treated as an agent ID
+    if (agentId === 'recent') {
+      return res.status(400).json({ error: 'Invalid agent ID: recent is a reserved keyword' });
+    }
+    
     const tasks = await TaskService.getPendingTasks(agentId);
     res.json(tasks);
   } catch (err) {
     console.error('Error getting pending tasks:', err);
+    if (err.message && err.message.includes('invalid input syntax for type uuid')) {
+      return res.status(400).json({ error: 'Invalid agent ID format' });
+    }
     res.status(500).json({ error: 'Failed to retrieve tasks' });
   }
 });
@@ -76,10 +88,19 @@ router.get('/pending/:agentId', async (req, res) => {
 router.get('/:agentId', async (req, res) => {
   try {
     const { agentId } = req.params;
+    
+    // Prevent "recent" from being treated as an agent ID
+    if (agentId === 'recent') {
+      return res.status(400).json({ error: 'Invalid agent ID: recent is a reserved keyword' });
+    }
+    
     const tasks = await TaskService.getAllTasks(agentId);
     res.json(tasks);
   } catch (err) {
     console.error('Error getting tasks:', err);
+    if (err.message && err.message.includes('invalid input syntax for type uuid')) {
+      return res.status(400).json({ error: 'Invalid agent ID format' });
+    }
     res.status(500).json({ error: 'Failed to retrieve tasks' });
   }
 });

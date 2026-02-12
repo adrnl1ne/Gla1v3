@@ -33,7 +33,7 @@ export default function Dashboard({ user, token, onLogout }) {
     if (!activeTenant) return;
 
     fetchAgents();
-    const interval = setInterval(fetchAgents, 5000);
+    const interval = setInterval(fetchAgents, 15000); // Reduced frequency to avoid 429 errors
     return () => clearInterval(interval);
   }, [activeTenant, token]);
   
@@ -44,6 +44,12 @@ export default function Dashboard({ user, token, onLogout }) {
       const res = await fetch(`https://api.gla1v3.local/api/agents?tenant_id=${activeTenant.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      
+      if (res.status === 429) {
+        console.warn('[Dashboard] Rate limited, skipping this fetch cycle');
+        return;
+      }
+      
       const data = await res.json();
       setAgents(data);
     } catch (err) {
@@ -105,6 +111,10 @@ export default function Dashboard({ user, token, onLogout }) {
           alignItems: 'center'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+            {/* Removed tenant display from left side to avoid overlap */}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
             {activeTenant && activeTab === 'agents' && (
               <div style={{
                 background: '#21262d',
@@ -117,9 +127,6 @@ export default function Dashboard({ user, token, onLogout }) {
                 <span style={{ color: '#58a6ff', fontWeight: '600' }}>{activeTenant.name}</span>
               </div>
             )}
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
             <TenantSelector />
             <UserMenu
               user={user}

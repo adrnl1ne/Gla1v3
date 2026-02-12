@@ -202,6 +202,12 @@ export default function AlertTable() {
         }
         
         const res = await fetch(url);
+        
+        if (res.status === 429) {
+          console.warn('[AlertTable] Rate limited, skipping this fetch cycle');
+          return;
+        }
+        
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         }
@@ -217,7 +223,7 @@ export default function AlertTable() {
     };
 
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, 8000); // Sync with agent beacon interval
+    const interval = setInterval(fetchAlerts, 18000); // Reduced frequency to avoid 429 errors
     return () => clearInterval(interval);
   }, [selectedEdr]);
 

@@ -177,7 +177,7 @@ function Home({ token, user }) {
     }
     
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 10000); // Refresh every 10s
+    const interval = setInterval(fetchDashboardData, 20000); // Reduced frequency to avoid 429 errors
     return () => clearInterval(interval);
   }, [token, activeTenant]);
 
@@ -208,6 +208,12 @@ function Home({ token, user }) {
           return { json: async () => [] };
         })
       ]);
+
+      // Check for rate limiting
+      if (agentsRes.status === 429 || alertsRes.status === 429) {
+        console.warn('[Dashboard] Rate limited, skipping this fetch cycle');
+        return;
+      }
 
       if (!agentsRes.ok) {
         throw new Error(`Agents fetch failed: ${agentsRes.status}`);

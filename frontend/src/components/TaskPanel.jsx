@@ -10,19 +10,29 @@ export default function TaskPanel({ agent, token, onClose }) {
 
   useEffect(() => {
     fetchTasks();
-    const interval = setInterval(fetchTasks, 5000); // Auto-refresh every 5s
+    const interval = setInterval(fetchTasks, 12000); // Reduced frequency to avoid 429 errors
     return () => clearInterval(interval);
   }, [agent.id]);
 
   const fetchTasks = async () => {
     try {
-      const res = await fetch(`https://api.gla1v3.local/api/agents/${agent.id}/tasks`, {
+      const token = localStorage.getItem('gla1v3_token');
+      const res = await fetch(`https://api.gla1v3.local/api/tasks/${agent.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      
+      if (res.status === 429) {
+        console.warn('[TaskPanel] Rate limited, skipping this fetch cycle');
+        return;
+      }
+      
       const data = await res.json();
-      setTasks(data);
+      
+      // Ensure data is always an array
+      setTasks(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to fetch tasks:', err);
+      setTasks([]);
     }
   };
 
@@ -31,14 +41,19 @@ export default function TaskPanel({ agent, token, onClose }) {
     
     setLoading(true);
     try {
+      const token = localStorage.getItem('gla1v3_token');
       const argsArray = args.trim() ? args.trim().split(' ') : [];
-      const res = await fetch(`https://api.gla1v3.local/api/agents/${agent.id}/tasks`, {
+      const res = await fetch(`https://api.gla1v3.local/api/tasks`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify({ cmd, args: argsArray })
+        body: JSON.stringify({ 
+          agentId: agent.id,
+          cmd, 
+          args: argsArray 
+        })
       });
       
       if (res.ok) {
@@ -217,7 +232,7 @@ export default function TaskPanel({ agent, token, onClose }) {
                 <button onClick={fetchTasks} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.85rem' }}>Refresh</button>
               </div>
 
-              {tasks.length === 0 ? (
+              {!Array.isArray(tasks) || tasks.length === 0 ? (
                 <div style={{ color: '#8b949e', textAlign: 'center', padding: '2rem', fontStyle: 'italic' }}>No tasks yet. Send a command to get started.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
