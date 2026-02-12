@@ -4,6 +4,7 @@ const router = express.Router();
 const AgentService = require('../services/agentService');
 const TaskService = require('../services/taskService');
 const TaskModel = require('../models/Task');
+const ResultModel = require('../models/Result');
 const { config } = require('../config/env');
 const { authenticateJWT, requireRole } = require('../middleware/auth');
 const tokenBlacklistService = require('../services/tokenBlacklistService');
@@ -16,6 +17,80 @@ const fs = require('fs').promises;
 const path = require('path');
 
 const execPromise = promisify(exec);
+
+/**
+ * Normalize a task object from DB/Redis into the shape expected by the Go agent.
+ *
+ * Backend sources:
+ * - Redis queue (tasks as stored by TaskQueueService.enqueueTask)
+ * - SQL function get_pending_tasks_for_agent (see infra/db/init/03-functions.sql)
+ *
+ * Go agent expects fields:
+ * - id        (string UUID)
+ * - cmd       (string, for command tasks)
+ * - args      ([]string)
+ * - type      ("command" | "embedded")
+ * - taskType  (embedded task type, e.g. "file_list", "sys_info")
+ * - params    (object with embedded task params)
+ * - runOnce   (boolean)
+ */
+function mapTaskForAgent(task) {
+  if (!task) return null;
+
+  // Identifier can be either id (from tasks table) or task_id (from helper function)
+  const id = task.id || task.task_id;
+
+  // Command & args: stored as command + JSON args in DB
+  const cmd = task.command || task.cmd || '';
+  let args = [];
+  if (Array.isArray(task.args)) {
+    args = task.args;
+  } else if (typeof task.args === 'string' && task.args.trim().length) {
+    try {
+      args = JSON.parse(task.args);
+    } catch {
+      args = [];
+    }
+  }
+
+  // Task type / embedded metadata
+  const rawTaskType = task.task_type || task.taskType || task.type;
+  const embeddedType = task.embedded_type || task.embeddedType;
+  const embeddedParams = task.embedded_params || task.params || {};
+  const isEmbedded = rawTaskType === 'embedded' || !!embeddedType;
+
+  // Normalize params to plain object
+  let params = {};
+  if (embeddedParams && typeof embeddedParams === 'object') {
+    params = embeddedParams;
+  } else if (typeof embeddedParams === 'string' && embeddedParams.trim().length) {
+    try {
+      params = JSON.parse(embeddedParams);
+    } catch {
+      params = {};
+    }
+  }
+
+  // Only expose taskType to the agent for embedded tasks.
+  // For command tasks, taskType should be empty so that the Go agent
+  // correctly routes them through the shell command executor instead
+  // of the embedded task executor.
+  const normalizedTaskType = isEmbedded ? (embeddedType || rawTaskType || '') : '';
+
+  const normalized = {
+    id,
+    cmd: cmd || '',
+    // keep legacy `command` key too for consumers that expect it
+    command: cmd || '',
+    args,
+    type: isEmbedded ? 'embedded' : 'command',
+    taskType: normalizedTaskType,
+    params,
+    runOnce: !!task.run_once || !!task.runOnce
+  };
+
+  return normalized;
+}
 
 // List all agents (public)
 router.get('/', async (req, res) => {
@@ -133,12 +208,22 @@ router.post('/beacon', async (req, res) => {
     }
     
     console.log(`[BEACON] Agent ${agent.id} (${agent.cn}) checked in - IP: ${agent.ip_address} - ${pendingTasks.length} pending task(s)`);
-    
+
+    // Normalize tasks into the shape expected by the Go agent
+    const tasksForAgent = pendingTasks
+      .map(mapTaskForAgent)
+      .filter((t) => t && (t.cmd || t.type === 'embedded'));
+
+    // DEBUG: log the exact tasks payload returned to agents (helps diagnose legacy/compat issues)
+    if (tasksForAgent.length > 0) {
+      console.log(`[BEACON] Sending ${tasksForAgent.length} task(s) to agent ${agent.id}:`, JSON.stringify(tasksForAgent));
+    }
+
     res.json({
       status: 'ok',
       agentId: agent.id,
       message: 'Beacon received',
-      tasks: pendingTasks
+      tasks: tasksForAgent
     });
   } catch (err) {
     console.error('Beacon error:', err);
@@ -389,15 +474,22 @@ router.post('/:agentId/embedded-tasks', async (req, res) => {
   console.log(`[EmbeddedTasks] Received ${results.length} task results from agent: ${agentId}`);
   
   try {
-    // Embedded tasks are run once on agent startup (sys_info, priv_check, etc.)
-    // Log the results for observability
+    // Persist embedded-task results so they appear in the UI/history.
+    // For each embedded result we create a completed `tasks` row and attach a `results` row.
+    const agent = await AgentService.getAgent(agentId);
+    const tenantId = agent ? agent.tenant_id : null;
+    // Prefer resolved UUID when persisting tasks/results (agentId param may be CN). Fallback to param.
+    const resolvedAgentId = agent && agent.id ? agent.id : agentId;
+
     let processedCount = 0;
-    
-    for (const result of results) {
-      const taskType = result.type || result.taskType;
-      const output = result.output || result.result || '';
-      
-      // Extract and log useful information
+
+    for (const r of results) {
+      const taskType = r.type || r.taskType;
+      const output = r.output || r.result || '';
+      const errMsg = r.error && typeof r.error === 'string' && r.error.trim().length > 0 ? r.error : null;
+      const params = r.params || {};
+
+      // Log summary for observability (same behaviour as before)
       if (taskType === 'sys_info' && output) {
         try {
           const sysInfo = typeof output === 'string' ? JSON.parse(output) : output;
@@ -419,12 +511,28 @@ router.post('/:agentId/embedded-tasks', async (req, res) => {
           console.error(`[EmbeddedTasks] Failed to parse priv_check:`, err.message);
         }
       } else {
-        console.log(`[EmbeddedTasks] Agent ${agentId} ${taskType}: ${output.substring(0, 100)}${output.length > 100 ? '...' : ''}`);
+        console.log(`[EmbeddedTasks] Agent ${agentId} ${taskType}: ${String(output).substring(0, 100)}${String(output).length > 100 ? '...' : ''}`);
       }
-      
-      processedCount++;
+
+      // Persist a task row (embedded, runOnce) and immediately mark it complete with the result
+      try {
+        const createdTask = await TaskModel.create(resolvedAgentId, {
+          type: 'embedded',
+          taskType: taskType,
+          params: params,
+          runOnce: true
+        }, tenantId, null);
+
+        // Use the existing updateResult flow to insert a result and mark completed
+        await TaskModel.updateResult(resolvedAgentId, createdTask.id, output, errMsg);
+
+        processedCount++;
+      } catch (dbErr) {
+        console.error(`[EmbeddedTasks] Failed to persist embedded result for ${taskType}:`, dbErr.message);
+        // continue processing remaining results
+      }
     }
-    
+
     console.log(`[EmbeddedTasks] Successfully processed ${processedCount}/${results.length} results from agent ${agentId}`);
     res.json({ success: true, received: results.length, processed: processedCount });
   } catch (error) {
@@ -462,7 +570,8 @@ router.post('/:agentId/tasks', async (req, res) => {
     }
 
     // Handle embedded task format (from task builder)
-    if (type === 'embedded' || taskType) {
+    // Only treat as embedded when explicitly requested or when taskType is an embedded kind.
+    if (type === 'embedded' || (taskType && taskType !== 'command')) {
       if (!taskType) {
         return res.status(400).json({ error: 'taskType required for embedded tasks' });
       }
@@ -486,6 +595,16 @@ router.post('/:agentId/tasks', async (req, res) => {
       return res.status(400).json({ error: 'Either cmd or taskType required' });
     }
 
+    // Enqueue task to Redis so it gets picked up by the agent immediately
+    try {
+      const normalizedTask = mapTaskForAgent(task);
+      await taskQueueService.enqueueTask(agentId, normalizedTask, tenantId);
+      console.log(`[TASK] Task ${task.id} enqueued to Redis for agent ${agentId}`);
+    } catch (redisErr) {
+      console.warn(`[TASK] Failed to enqueue to Redis (will use SQL fallback):`, redisErr.message);
+      // Continue anyway - SQL fallback will pick it up
+    }
+
     res.status(201).json(task);
   } catch (err) {
     console.error('[TASK] Creation error:', err);
@@ -507,12 +626,33 @@ router.get('/:agentId/tasks', async (req, res) => {
 router.post('/:agentId/tasks/:taskId/result', async (req, res) => {
   try {
     const { agentId, taskId } = req.params;
+
+    // Log incoming result body for debugging (temporary, helps verify agent payload)
+    console.log(`[TASK-RESULT] Incoming result for ${taskId} from ${agentId}:`, JSON.stringify(req.body));
+
     const { result, error } = req.body;
     
     const task = await TaskService.updateTaskResult(agentId, taskId, result, error);
     
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
+    }
+
+    // Remove task from Redis processing set + clear the queued list entry so it is not
+    // repeatedly sent on subsequent beacons.
+    try {
+      const AgentModel = require('../models/Agent');
+      const agent = await AgentModel.findById(agentId);
+      const tenantId = agent ? agent.tenant_id : null;
+      const resolvedAgentId = agent && agent.id ? agent.id : agentId; // prefer UUID
+
+      // Remove from processing hash (best-effort)
+      await taskQueueService.completeTask(resolvedAgentId, taskId, tenantId).catch(() => {});
+
+      // Remove the actual queued list element (best-effort)
+      await taskQueueService.removeTaskFromQueue(resolvedAgentId, tenantId, taskId).catch(() => {});
+    } catch (queueErr) {
+      console.warn('[TASK] Failed to clean task from Redis queue (best-effort):', queueErr.message);
     }
     
     console.log(`[TASK] Task ${taskId} completed for agent ${agentId}: ${task.status}`);

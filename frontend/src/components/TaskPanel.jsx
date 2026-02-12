@@ -8,61 +8,106 @@ export default function TaskPanel({ agent, token, onClose }) {
   const [loading, setLoading] = useState(false);
   const [showTaskModal, setShowTaskModal] = useState(false);
 
+  // Helper utilities (normalize API shapes and timestamps)
+  const getAuthToken = () => token || localStorage.getItem('gla1v3_token');
+  const getTaskResult = (t) => t?.result ?? t?.stdout ?? null;
+  const getTaskError = (t) => t?.error ?? t?.error_message ?? null;
+  const getArgsString = (t) => {
+    const a = t?.args;
+    if (Array.isArray(a)) return a.join(' ');
+    if (typeof a === 'string') {
+      try {
+        const parsed = JSON.parse(a);
+        if (Array.isArray(parsed)) return parsed.join(' ');
+      } catch (e) {
+        return a;
+      }
+    }
+    return '';
+  };
+  const formatTs = (v) => v ? new Date(v).toLocaleString() : '—';
+
   useEffect(() => {
     fetchTasks();
     const interval = setInterval(fetchTasks, 12000); // Reduced frequency to avoid 429 errors
     return () => clearInterval(interval);
-  }, [agent.id]);
+  }, [agent?.id]);
 
   const fetchTasks = async () => {
     try {
-      const token = localStorage.getItem('gla1v3_token');
+      const authToken = getAuthToken();
       const res = await fetch(`https://api.gla1v3.local/api/tasks/${agent.id}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${authToken}` }
       });
-      
+
       if (res.status === 429) {
         console.warn('[TaskPanel] Rate limited, skipping this fetch cycle');
         return;
       }
-      
+
+      if (!res.ok) {
+        console.error('[TaskPanel] Failed to fetch tasks:', res.status, res.statusText);
+        return;
+      }
+
       const data = await res.json();
-      
-      // Ensure data is always an array
-      setTasks(Array.isArray(data) ? data : []);
+
+      // Ensure data is always an array and sort by creation date (newest first)
+      const taskArray = Array.isArray(data) ? data : [];
+      setTasks(taskArray.sort((a, b) => {
+        const dateA = new Date(a.created_at || a.createdAt || 0);
+        const dateB = new Date(b.created_at || b.createdAt || 0);
+        return dateB - dateA; // Newest first
+      }));
     } catch (err) {
-      console.error('Failed to fetch tasks:', err);
-      setTasks([]);
+      console.error('[TaskPanel] Failed to fetch tasks:', err);
+      // Don't clear tasks on error, keep showing existing tasks
     }
   };
 
   const sendTask = async () => {
     if (!cmd.trim()) return;
-    
+
     setLoading(true);
     try {
-      const token = localStorage.getItem('gla1v3_token');
+      const authToken = getAuthToken();
       const argsArray = args.trim() ? args.trim().split(' ') : [];
       const res = await fetch(`https://api.gla1v3.local/api/tasks`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` 
+          'Authorization': `Bearer ${authToken}`
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           agentId: agent.id,
-          cmd, 
-          args: argsArray 
+          cmd,
+          args: argsArray
         })
       });
-      
+
       if (res.ok) {
+        const created = await res.json();
+        // Optimistic update: add created task to UI immediately at the top
+        setTasks(prev => [{
+          ...created,
+          // normalize createdAt alias used by UI
+          createdAt: created.created_at || created.createdAt || new Date().toISOString(),
+          completedAt: created.completed_at || created.completedAt || null,
+          // Ensure we have the command and args
+          cmd: created.command || created.cmd || cmd,
+          args: created.args || argsArray
+        }, ...prev]);
+
         setCmd('');
         setArgs('');
-        fetchTasks();
+
+        // Refresh after a short delay to get any updates
+        setTimeout(() => fetchTasks(), 1000);
+      } else {
+        console.error('[TaskPanel] Failed to send task:', res.status, res.statusText);
       }
     } catch (err) {
-      console.error('Failed to send task:', err);
+      console.error('[TaskPanel] Failed to send task:', err);
     } finally {
       setLoading(false);
     }
@@ -71,11 +116,12 @@ export default function TaskPanel({ agent, token, onClose }) {
   const sendEmbeddedTask = async (task) => {
     setLoading(true);
     try {
+      const authToken = getAuthToken();
       const res = await fetch(`https://api.gla1v3.local/api/agents/${agent.id}/tasks`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` 
+          'Authorization': `Bearer ${authToken}`
         },
         body: JSON.stringify({
           type: 'embedded',
@@ -84,14 +130,28 @@ export default function TaskPanel({ agent, token, onClose }) {
           runOnce: task.runOnce || false
         })
       });
-      
+
       if (res.ok) {
-        fetchTasks();
+        const created = await res.json();
+        // Optimistic update: add created task to UI immediately at the top
+        setTasks(prev => [{
+          ...created,
+          createdAt: created.created_at || created.createdAt || new Date().toISOString(),
+          completedAt: created.completed_at || created.completedAt || null,
+          type: created.task_type || created.type || 'embedded',
+          taskType: created.embedded_type || created.taskType || task.type,
+          params: created.embedded_params || created.params || task.params
+        }, ...prev]);
+
+        // Refresh after a short delay to get any updates
+        setTimeout(() => fetchTasks(), 1000);
         return true;
+      } else {
+        console.error('[TaskPanel] Failed to send embedded task:', res.status, res.statusText);
+        return false;
       }
-      return false;
     } catch (err) {
-      console.error('Failed to send embedded task:', err);
+      console.error('[TaskPanel] Failed to send embedded task:', err);
       return false;
     } finally {
       setLoading(false);
@@ -115,8 +175,8 @@ export default function TaskPanel({ agent, token, onClose }) {
 
   // Filter commands based on agent OS
   const agentOS = agent.os?.toLowerCase() || 'linux';
-  const filteredCommands = quickCommands.filter(cmd => 
-    cmd.os === 'all' || agentOS.includes(cmd.os)
+  const filteredCommands = quickCommands.filter(qc => 
+    qc.os === 'all' || agentOS.includes(qc.os)
   );
 
   return (
@@ -177,7 +237,7 @@ export default function TaskPanel({ agent, token, onClose }) {
                   onChange={(e) => setCmd(e.target.value)}
                   placeholder="e.g., whoami"
                   style={{ width: '100%', background: '#0d1117', border: '1px solid #30363d', color: '#c9d1d9', padding: '8px 12px', borderRadius: 6, fontFamily: 'monospace' }}
-                  onKeyPress={(e) => e.key === 'Enter' && sendTask()}
+                  onKeyDown={(e) => e.key === 'Enter' && sendTask()}
                 />
               </div>
 
@@ -236,7 +296,7 @@ export default function TaskPanel({ agent, token, onClose }) {
                 <div style={{ color: '#8b949e', textAlign: 'center', padding: '2rem', fontStyle: 'italic' }}>No tasks yet. Send a command to get started.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  {tasks.slice().reverse().map(task => (
+                  {tasks.map(task => (
                     <div key={task.id} style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: 6, padding: '0.75rem' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                         <div style={{ fontFamily: 'monospace', color: '#79c0ff', fontSize: '0.9rem' }}>
@@ -246,7 +306,7 @@ export default function TaskPanel({ agent, token, onClose }) {
                               {task.taskType}
                             </span>
                           ) : (
-                            <span>{task.cmd} {task.args?.join(' ')}</span>
+                            <span>{task.cmd} {getArgsString(task)}</span>
                           )}
                         </div>
                         <span style={{ 
@@ -261,32 +321,79 @@ export default function TaskPanel({ agent, token, onClose }) {
                         </span>
                       </div>
                       
-                      {task.result && (
-                        <pre style={{ 
-                          margin: '0.5rem 0 0 0', 
-                          background: '#010409', 
-                          padding: '0.5rem', 
-                          borderRadius: 4, 
-                          fontSize: '0.8rem',
-                          color: '#c9d1d9',
-                          maxHeight: '150px',
-                          overflow: 'auto',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-all'
-                        }}>
-                          {task.result}
-                        </pre>
-                      )}
-                      
-                      {task.error && (
-                        <div style={{ marginTop: '0.5rem', color: '#f85149', fontSize: '0.85rem' }}>
-                          Error: {task.error}
-                        </div>
-                      )}
+                      {(() => {
+
+                        if (getTaskResult(task) || getTaskError(task)) {
+
+                          return (
+
+                            <>
+
+                              {getTaskResult(task) && (
+
+                                <pre style={{ 
+
+                                  margin: '0.5rem 0 0 0', 
+
+                                  background: '#010409', 
+
+                                  padding: '0.5rem', 
+
+                                  borderRadius: 4, 
+
+                                  fontSize: '0.8rem',
+
+                                  color: '#c9d1d9',
+
+                                  maxHeight: '150px',
+
+                                  overflow: 'auto',
+
+                                  whiteSpace: 'pre-wrap',
+
+                                  wordBreak: 'break-all'
+
+                                }}>
+
+                                  {getTaskResult(task)}
+
+                                </pre>
+
+                              )}
+
+                              {getTaskError(task) && (
+
+                                <div style={{ marginTop: '0.5rem', color: '#f85149', fontSize: '0.85rem' }}>
+
+                                  Error: {getTaskError(task)}
+
+                                </div>
+
+                              )}
+
+                            </>
+
+                          );
+
+                        } else if (task.status === 'completed') {
+
+                          return (
+
+                            <div style={{ marginTop: '0.5rem', color: '#6e7681', fontStyle: 'italic' }}>No output captured for this task.</div>
+
+                          );
+
+                        } else {
+
+                          return null;
+
+                        }
+
+                      })()}
                       
                       <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#6e7681' }}>
-                        Created: {new Date(task.createdAt).toLocaleString()}
-                        {task.completedAt && ` | Completed: ${new Date(task.completedAt).toLocaleString()}`}
+                        Created: {formatTs(task.createdAt || task.created_at)}
+                        {(task.completedAt || task.completed_at) && ` | Completed: ${formatTs(task.completedAt || task.completed_at)}`}
                       </div>
                     </div>
                   ))}

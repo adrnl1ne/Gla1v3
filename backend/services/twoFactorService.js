@@ -1,6 +1,6 @@
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const pool = require('../db/connection');
 

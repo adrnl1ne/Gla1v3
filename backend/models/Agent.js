@@ -107,6 +107,21 @@ class AgentModel {
   }
   
   static async findById(agentId) {
+    if (!agentId) return null;
+
+    // If caller passed a human-friendly CN (non-UUID), allow lookup by CN for
+    // backwards-compatibility with embedded agents that use their CN as id.
+    // IMPORTANT: do NOT attempt a UUID id lookup when the input is not a UUID
+    // — Postgres will reject non-UUID strings and throw 22P02 errors.
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    // If the identifier is not a UUID, try CN lookup only and return whatever we find.
+    if (!uuidRegex.test(String(agentId))) {
+      const byCN = await AgentModel.findByCN(agentId);
+      return byCN || null;
+    }
+
+    // At this point agentId looks like a UUID; safe to query by id.
     const result = await query(
       'SELECT * FROM agents WHERE id = $1',
       [agentId]

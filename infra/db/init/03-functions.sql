@@ -76,27 +76,23 @@ RETURNS TABLE(
     created_at TIMESTAMPTZ
 ) AS $$
 BEGIN
-    -- Mark tasks as sent
+    -- Mark tasks as sent and return them atomically
+    -- This prevents returning the same task multiple times
+    RETURN QUERY
     UPDATE tasks
     SET status = 'sent', sent_at = NOW()
     WHERE agent_id = agent_uuid
-    AND status = 'pending';
-    
-    -- Return the tasks
-    RETURN QUERY
-    SELECT 
-        t.id,
-        t.task_type,
-        t.command,
-        t.args,
-        t.embedded_type,
-        t.embedded_params,
-        t.run_once,
-        t.created_at
-    FROM tasks t
-    WHERE t.agent_id = agent_uuid
-    AND t.status = 'sent'
-    ORDER BY t.created_at ASC;
+    AND status = 'pending'
+    RETURNING
+        id,
+        task_type,
+        command,
+        args,
+        embedded_type,
+        embedded_params,
+        run_once,
+        created_at
+    ORDER BY created_at ASC;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -120,10 +116,10 @@ BEGIN
     SELECT tenant_id, agent_id INTO task_tenant_id, task_agent_id
     FROM tasks WHERE id = task_uuid;
     
-    -- Update task status
+    -- Update task status (treat empty-string errors as no-error)
     UPDATE tasks
     SET 
-        status = CASE WHEN task_error IS NOT NULL THEN 'failed' ELSE 'completed' END,
+        status = CASE WHEN task_error IS NOT NULL AND length(trim(task_error)) > 0 THEN 'failed' ELSE 'completed' END,
         completed_at = NOW()
     WHERE id = task_uuid;
     

@@ -14,8 +14,13 @@ class TaskQueueService {
   async enqueueTask(agentId, task, tenantId) {
     try {
       const queueKey = redisClient.getKey('queue:agent', agentId, tenantId);
+      // Normalize command alias so agents always receive `cmd` (legacy DB uses `command`).
+      const normalizedTask = Object.assign({}, task);
+      if (!normalizedTask.cmd && normalizedTask.command) {
+        normalizedTask.cmd = normalizedTask.command;
+      }
       const taskData = JSON.stringify({
-        ...task,
+        ...normalizedTask,
         enqueuedAt: new Date().toISOString()
       });
 
@@ -27,11 +32,11 @@ class TaskQueueService {
       await redisClient.publish(channel, JSON.stringify({
         type: 'NEW_TASK',
         agentId,
-        taskId: task.task_id,
+        taskId: task.id || task.task_id,
         timestamp: new Date().toISOString()
       }));
 
-      console.log(`📬 Task ${task.task_id} enqueued for agent ${agentId}`);
+      console.log(`📬 Task ${task.id || task.task_id} enqueued for agent ${agentId}`);
 
       return { success: true, queueLength: await this.getQueueLength(agentId, tenantId) };
     } catch (error) {
@@ -58,13 +63,14 @@ class TaskQueueService {
       
       // Store in processing set with timeout
       const processingKey = redisClient.getKey('processing:agent', agentId, tenantId);
-      await redisClient.hSet(processingKey, task.task_id, JSON.stringify({
+      const taskId = task.id || task.task_id;
+      await redisClient.hSet(processingKey, taskId, JSON.stringify({
         task,
         dequeuedAt: new Date().toISOString()
       }));
       await redisClient.expire(processingKey, 3600); // 1 hour processing timeout
 
-      console.log(`📤 Task ${task.task_id} dequeued by agent ${agentId}`);
+      console.log(`📤 Task ${taskId} dequeued by agent ${agentId}`);
 
       return task;
     } catch (error) {
@@ -121,6 +127,37 @@ class TaskQueueService {
     } catch (error) {
       console.error('Error getting pending tasks:', error);
       return [];
+    }
+  }
+
+  /**
+   * Remove a specific task from an agent queue (used when agent reports completion)
+   * This finds the queued JSON item whose id matches taskId and removes it from the list.
+   */
+  async removeTaskFromQueue(agentId, tenantId, taskId) {
+    try {
+      const queueKey = redisClient.getKey('queue:agent', agentId, tenantId);
+      const items = await redisClient.lRange(queueKey, 0, -1);
+
+      for (const item of items) {
+        try {
+          const parsed = JSON.parse(item);
+          const id = parsed.id || parsed.task_id;
+          if (id === taskId) {
+            // Remove the exact serialized list element (one occurrence)
+            await redisClient.lRem(queueKey, 1, item);
+            console.log(`🧹 Removed task ${taskId} from Redis queue for agent ${agentId}`);
+            return { removed: true };
+          }
+        } catch (err) {
+          // ignore parse errors and continue
+        }
+      }
+
+      return { removed: false };
+    } catch (error) {
+      console.error('Error removing task from queue:', error);
+      return { removed: false, error };
     }
   }
 

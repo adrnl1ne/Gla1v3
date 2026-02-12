@@ -4,8 +4,13 @@ const { query } = require('../db/connection');
 
 class TaskModel {
   static async create(agentId, taskData, tenantId, createdBy = null) {
-    // Handle embedded task format
-    if (taskData.type === 'embedded' || taskData.taskType) {
+    // Decide whether this is an embedded task or a shell/command task.
+    // Older callers sometimes set `taskType: 'command'` for commands — treat that as a command,
+    // and only treat a task as "embedded" when `type === 'embedded'` OR taskType explicitly
+    // identifies an embedded action (i.e. not the literal string 'command').
+    const isEmbedded = taskData.type === 'embedded' || (typeof taskData.taskType === 'string' && taskData.taskType !== 'command');
+
+    if (isEmbedded) {
       const result = await query(
         `INSERT INTO tasks (
           tenant_id, agent_id, task_type, embedded_type, embedded_params, run_once, created_by, status
@@ -22,33 +27,32 @@ class TaskModel {
           'pending'
         ]
       );
-      
+
       console.log(`[TASK] Created embedded task: ${result.rows[0].id} for agent ${agentId}`);
       return result.rows[0];
     }
-    // Handle command task format
-    else {
-      const result = await query(
-        `INSERT INTO tasks (
-          tenant_id, agent_id, task_type, command, args, created_by, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING *`,
-        [
-          tenantId,
-          agentId,
-          'command',
-          taskData.cmd,
-          JSON.stringify(taskData.args || []),
-          createdBy,
-          'pending'
-        ]
-      );
-      
-      console.log(`[TASK] Created command task: ${result.rows[0].id} for agent ${agentId}`);
-      return result.rows[0];
-    }
+
+    // Otherwise treat as a command task
+    const result = await query(
+      `INSERT INTO tasks (
+        tenant_id, agent_id, task_type, command, args, created_by, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *`,
+      [
+        tenantId,
+        agentId,
+        'command',
+        taskData.cmd,
+        JSON.stringify(taskData.args || []),
+        createdBy,
+        'pending'
+      ]
+    );
+
+    console.log(`[TASK] Created command task: ${result.rows[0].id} for agent ${agentId}`);
+    return result.rows[0];
   }
-  
+
   static async getPendingForAgent(agentId) {
     const result = await query(
       'SELECT * FROM get_pending_tasks_for_agent($1)',
@@ -93,6 +97,9 @@ class TaskModel {
   }
   
   static async updateResult(agentId, taskId, result, error = null) {
+    // Normalize empty-string errors to NULL so the DB doesn't treat "" as an actual error
+    const dbError = (typeof error === 'string' && error.trim().length === 0) ? null : error;
+
     // Use the complete_task function which handles both task update and result insertion
     const queryResult = await query(
       'SELECT complete_task($1, $2, $3, NULL, $4)',
@@ -100,7 +107,7 @@ class TaskModel {
         taskId,
         typeof result === 'string' ? result : JSON.stringify(result),
         null, // stderr
-        error
+        dbError
       ]
     );
     

@@ -278,7 +278,7 @@ router.put('/profile', authenticateJWT, auditAction('profile_update'), async (re
     }
 
     // Verify current password
-    const bcrypt = require('bcrypt');
+    const bcrypt = require('bcryptjs');
     const isValidPassword = await bcrypt.compare(currentPassword, user.password_hash);
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Current password is incorrect' });
