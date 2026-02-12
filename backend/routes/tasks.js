@@ -32,30 +32,56 @@ router.get('/recent', async (req, res) => {
 // Create task for agent
 router.post('/', auditAction('create_task'), async (req, res) => {
   try {
-    const { agentId, cmd, args, tenantId } = req.body;
-    
-    if (!agentId || !cmd) {
-      return res.status(400).json({ error: 'agentId and cmd required' });
+    const { agentId, cmd, args, tenantId, taskType, type, params, runOnce } = req.body;
+    console.log('[TASK] Incoming task request:', req.body);
+    if (!agentId || (!cmd && !taskType)) {
+      return res.status(400).json({ error: 'agentId and either cmd or taskType required' });
     }
-    
     const agent = await AgentService.getAgent(agentId);
     if (!agent) {
       return res.status(404).json({ error: 'Agent not found' });
     }
-    
     // Use agent's tenant if not specified
     const taskTenantId = tenantId || agent.tenant_id;
-    
-    const task = await TaskService.createTask(agentId, { cmd, args }, taskTenantId);
-    
+    // Normalize task payload
+    let normalizedTaskType = taskType;
+    let normalizedType = type;
+    let normalizedParams = params;
+    let normalizedRunOnce = runOnce;
+    let normalizedCmd = cmd;
+    let normalizedArgs = args || [];
+    // Legacy command: only cmd
+    if (cmd && !taskType) {
+      normalizedTaskType = 'command';
+      normalizedType = 'command';
+      normalizedParams = { args: normalizedArgs };
+      normalizedRunOnce = false;
+    }
+    // Embedded task: only taskType
+    if (taskType && !cmd && (!type || !params)) {
+      normalizedType = 'embedded';
+      normalizedParams = params || {};
+      normalizedRunOnce = typeof runOnce === 'boolean' ? runOnce : false;
+    }
+    // Build task payload
+    const taskPayload = {
+      cmd: normalizedCmd,
+      args: normalizedArgs,
+      taskType: normalizedTaskType,
+      type: normalizedType,
+      params: normalizedParams,
+      runOnce: normalizedRunOnce
+    };
+    // Remove undefined fields
+    Object.keys(taskPayload).forEach(k => taskPayload[k] === undefined && delete taskPayload[k]);
+    const task = await TaskService.createTask(agentId, taskPayload, taskTenantId);
     // Enqueue task in Redis for faster delivery
     try {
       await taskQueueService.enqueueTask(agentId, task, taskTenantId);
-      console.log(`[TASK] Created and enqueued task ${task.id} for agent ${agentId}: ${cmd}`);
+      console.log(`[TASK] Created and enqueued task ${task.id} for agent ${agentId}:`, taskPayload);
     } catch (redisErr) {
       console.warn('[TASK] Redis enqueue failed, task will be delivered via SQL polling:', redisErr.message);
     }
-    
     res.status(201).json(task);
   } catch (err) {
     console.error('Task creation error:', err);

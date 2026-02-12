@@ -177,7 +177,56 @@ Manage agent tasks with three sections:
 - **Task History**: View results from completed tasks
 
 ### Alert Table
-Displays EDR alerts correlated with agent IDs. Shows detection events from integrated EDR systems.
+Displays EDR alerts correlated with agent IDs. Shows detection events from integrated EDR systems (requires Wazuh EDR to be running).
+
+## EDR Integration (Optional)
+
+The platform includes **Wazuh EDR** for advanced threat detection and monitoring. EDR integration is **optional** - the C2 platform works fully without it.
+
+### Starting Wazuh EDR
+
+The start scripts automatically attempt to start Wazuh after the main infrastructure. If you see:
+
+```
+⚠️  Wazuh EDR failed to start (platform will work without EDR)
+```
+
+This is **not a critical error**. The C2 platform is fully functional without EDR.
+
+### Manual Wazuh Startup
+
+If you want to enable EDR monitoring:
+
+**Windows:**
+```powershell
+cd infra\wazuh
+docker compose up -d
+```
+
+**Linux/Mac:**
+```bash
+cd infra/wazuh
+docker compose up -d
+```
+
+**Access Wazuh Dashboard:**
+- URL: `http://localhost:8443`
+- Username: `admin`
+- Password: `SecretPassword`
+
+### Wazuh Requirements
+
+- **Additional 4GB RAM** for OpenSearch and Wazuh containers
+- **10GB disk space** for alert indexing
+- Main infrastructure must be running first
+
+### Without Wazuh
+
+If you skip Wazuh:
+- ✅ All C2 functionality works (agents, tasks, beacons)
+- ✅ Agent monitoring and control fully operational
+- ❌ Alert correlation unavailable
+- ❌ EDR detections not shown in Alert Table
 
 ## Common Issues and Solutions
 
@@ -199,9 +248,19 @@ Displays EDR alerts correlated with agent IDs. Shows detection events from integ
 **Issue**: Docker containers fail to start  
 **Solutions**:
 - Ensure Docker Desktop is running
-- Check available RAM (need 8GB minimum)
+- Check available RAM (need 8GB minimum for core, 12GB with Wazuh)
 - Review logs: `docker logs gla1v3-backend`
-- Try stopping and restarting: `docker-compose down && docker-compose up -d`
+- Try stopping and restarting: `docker compose down && docker compose up -d`
+
+### Wazuh Won't Start
+**Issue**: Wazuh EDR fails to start or shows errors  
+**Solutions**:
+- Ensure main infrastructure is running first (`cd infra && docker compose ps`)
+- Check if you have 12GB+ RAM available (Wazuh needs 4GB extra)
+- Verify network exists: `docker network ls | grep wazuh-net`
+- Try manual start: `cd infra/wazuh && docker compose up -d`
+- View logs: `docker logs wazuh-edr`
+- **Remember**: Platform works fully without Wazuh - EDR is optional
 
 ### Wrong Geo-Location
 **Issue**: Agent shows incorrect location on map  

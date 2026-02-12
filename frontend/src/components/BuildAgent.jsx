@@ -217,6 +217,7 @@ export default function BuildAgent() {
         setDownloadFilename(result.filename);
         setBuildInfo({
           agentId: result.agentId,
+          certId: result.certId,
           tasks: result.tasks,
           beaconInterval: result.beaconInterval,
           c2Server: result.c2Server,
@@ -308,10 +309,10 @@ export default function BuildAgent() {
                 type="text"
                 value={formData.agentId}
                 onChange={(e) => setFormData({...formData, agentId: e.target.value})}
-                placeholder="e.g., production-db-server"
+                placeholder="e.g., prod-web-01, db-server-nyc"
                 disabled={building}
               />
-              <small>Unique identifier for this agent</small>
+              <small>Unique identifier embedded in this agent (shows in dashboard)</small>
             </div>
             
             <div className="form-row">
@@ -560,6 +561,10 @@ export default function BuildAgent() {
                 <div className="info-row">
                   <span>Agent ID:</span>
                   <strong>{buildInfo.agentId}</strong>
+                </div>
+                <div className="info-row">
+                  <span>Certificate ID:</span>
+                  <strong style={{ fontFamily: 'monospace', fontSize: '0.9em' }}>{buildInfo.certId}</strong>
                 </div>
                 <div className="info-row">
                   <span>Tasks:</span>

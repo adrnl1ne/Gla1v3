@@ -59,7 +59,7 @@ if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
 }
 
 Write-Host ""
-Write-Host "[4/4] Starting Docker services..." -ForegroundColor Yellow
+Write-Host "[4/6] Starting Docker services..." -ForegroundColor Yellow
 Set-Location $PSScriptRoot
 docker compose up -d --build
 
@@ -69,6 +69,28 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
+Write-Host "[5/6] Starting Wazuh EDR (optional)..." -ForegroundColor Yellow
+if (Test-Path "$PSScriptRoot\wazuh\docker-compose.yml") {
+    Set-Location "$PSScriptRoot\wazuh"
+    docker compose up -d
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✓ Wazuh EDR started successfully" -ForegroundColor Green
+    } else {
+        Write-Host "⚠️  Wazuh EDR failed to start (platform will work without EDR)" -ForegroundColor Yellow
+    }
+    Set-Location $PSScriptRoot
+} else {
+    Write-Host "⚠️  Wazuh configuration not found, skipping..." -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "[6/6] Verifying services..." -ForegroundColor Yellow
+Start-Sleep -Seconds 3
+$running = docker ps --filter "name=gla1v3" --format "{{.Names}}" | Measure-Object | Select-Object -ExpandProperty Count
+Write-Host "✓ $running core services running" -ForegroundColor Green
+
+Write-Host ""
 Write-Host "Infrastructure started successfully!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Services:" -ForegroundColor Cyan
@@ -76,6 +98,9 @@ Write-Host "  Dashboard: https://dashboard.gla1v3.local" -ForegroundColor White
 Write-Host "  API:       https://api.gla1v3.local" -ForegroundColor White
 Write-Host "  C2:        https://c2.gla1v3.local" -ForegroundColor White
 Write-Host "  CA:        https://ca.gla1v3.local" -ForegroundColor White
+if (docker ps --filter "name=wazuh-edr" --format "{{.Names}}" | Select-String "wazuh-edr") {
+    Write-Host "  Wazuh EDR: http://localhost:8443 (admin/SecretPassword)" -ForegroundColor White
+}
 Write-Host ""
 Write-Host "Default Credentials:" -ForegroundColor Cyan
 Write-Host "  Username: admin" -ForegroundColor White

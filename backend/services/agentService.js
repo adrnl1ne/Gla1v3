@@ -26,7 +26,12 @@ class AgentService {
       // Generate certificate from CA service for this agent
       let certId = null;
       try {
-        const certData = await CAClient.generateCertificate(agentId, agentId, 3600);
+        const certData = await CAClient.generateCertificate({
+          userId: agentId,
+          sessionId: agentId,
+          role: 'agent',
+          ttl: 31536000  // 365 days
+        });
         certId = certData.certId;
         console.log(`[AGENT] Generated dynamic certificate: ${certId}`);
       } catch (err) {

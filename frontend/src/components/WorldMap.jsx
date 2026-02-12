@@ -27,8 +27,8 @@ export default function WorldMap({ agents, getColor, agent }) {
   };
 
   // If a single agent is provided, center on it and show a focused map
-  const agentLat = agent ? toNum(agent.lat) : null;
-  const agentLng = agent ? toNum(agent.lng) : null;
+  const agentLat = agent ? toNum(agent.latitude || agent.lat) : null;
+  const agentLng = agent ? toNum(agent.longitude || agent.lng) : null;
   const center = agentLat !== null && agentLng !== null ? [agentLat, agentLng] : [20, 0];
   const zoom = agentLat !== null && agentLng !== null ? 6 : 2;
 
@@ -41,10 +41,16 @@ export default function WorldMap({ agents, getColor, agent }) {
         attribution='&copy; OpenStreetMap & Carto'
       />
       {markers.map(a => {
-        const lat = toNum(a.lat);
-        const lng = toNum(a.lng);
+        const lat = toNum(a.latitude || a.lat);
+        const lng = toNum(a.longitude || a.lng);
         const [fbLat, fbLng] = hashToLatLng(a.id || String(Math.random()));
         const position = [lat !== null ? lat : fbLat, lng !== null ? lng : fbLng];
+        
+        const geoLocation = a.geo_city && a.geo_country
+          ? `${a.geo_city}, ${a.geo_country}`
+          : a.geo?.city && a.geo?.country
+          ? `${a.geo.city}, ${a.geo.country}`
+          : null;
 
         return (
         <Marker
@@ -52,7 +58,7 @@ export default function WorldMap({ agents, getColor, agent }) {
           position={position}
           icon={L.divIcon({
             className: '',
-            html: `<div style="background:${getColor(a.lastSeen)};width:14px;height:14px;border-radius:50%;border:3px solid #000;box-shadow:0 0 12px #fff;"></div>`,
+            html: `<div style="background:${getColor(a.last_seen || a.lastSeen)};width:14px;height:14px;border-radius:50%;border:3px solid #000;box-shadow:0 0 12px #fff;"></div>`,
             iconSize: [14, 14],
           })}
         >
@@ -60,10 +66,9 @@ export default function WorldMap({ agents, getColor, agent }) {
             <div style={{ fontFamily: 'monospace', minWidth: '200px' }}>
               <strong>{a.id}</strong><br />
               CN: <span style={{ color: '#ff7b72' }}>{a.cn}</span><br />
-              {a.localIp && (<>Local IP: <span style={{ color: '#ffa657' }}>{a.localIp}</span><br /></>)}
-              Public IP: <span style={{ color: '#79c0ff' }}>{a.ip}</span><br />
-              {a.geo && (<>Location: {a.geo.city || ''} {a.geo.country ? '(' + a.geo.country + ')' : ''}<br /></>)}
-              Last: {new Date(a.lastSeen).toLocaleTimeString()}
+              Public IP: <span style={{ color: '#79c0ff' }}>{a.ip_address || a.ip}</span><br />
+              {geoLocation && (<>Location: {geoLocation}<br /></>)}
+              Last: {new Date(a.last_seen || a.lastSeen).toLocaleString()}
             </div>
           </Popup>
         </Marker>

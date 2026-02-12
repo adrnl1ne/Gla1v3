@@ -8,7 +8,7 @@ class CAClient {
    * Revoke a certificate by cert ID
    * @param {string} certId - Certificate ID to revoke
    * @param {string} reason - Revocation reason (e.g., 'agent_blacklisted')
-   * @returns {Promise<Object>} Revocation response
+   * @returns {Promise<Object>} {success: boolean, certId: string, error?: string}
    */
   static async revokeCertificate(certId, reason = 'unspecified') {
     try {
@@ -19,16 +19,17 @@ class CAClient {
       });
 
       if (!response.ok) {
-        const error = await response.json();
+        const error = await response.json().catch(() => ({ error: response.statusText }));
         throw new Error(error.error || 'Failed to revoke certificate');
       }
 
       const data = await response.json();
       console.log(`[CA] Certificate revoked: ${certId} (reason: ${reason})`);
-      return data;
+      return { success: true, certId: data.certId };
     } catch (err) {
-      console.error(`[CA] Failed to revoke certificate ${certId}:`, err);
-      throw err;
+      console.error(`[CA] Failed to revoke certificate ${certId}:`, err.message);
+      // Return failure instead of throwing to allow blacklist to continue
+      return { success: false, certId, error: err.message };
     }
   }
 

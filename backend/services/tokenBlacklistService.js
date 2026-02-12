@@ -1,6 +1,7 @@
 const redisClient = require('../utils/redisClient');
 const jwt = require('jsonwebtoken');
 const { query } = require('../db/connection');
+const CAClient = require('../utils/caClient');
 
 class TokenBlacklistService {
   /**
@@ -66,6 +67,32 @@ class TokenBlacklistService {
         console.log(`[BLACKLIST] Persisted to database: agent ${agentId}`);
       } catch (dbErr) {
         console.error('[BLACKLIST] DB persistence failed:', dbErr.message);
+      }
+
+      // Automatically revoke certificate if agent has one
+      try {
+        const agentResult = await query(
+          'SELECT cert_id FROM agents WHERE id = $1',
+          [agentId]
+        );
+        
+        if (agentResult.rows.length > 0 && agentResult.rows[0].cert_id) {
+          const certId = agentResult.rows[0].cert_id;
+          console.log(`[BLACKLIST] Revoking certificate for agent ${agentId}: ${certId}`);
+          
+          const revocationResult = await CAClient.revokeCertificate(certId, `Agent blacklisted: ${reason}`);
+          
+          if (revocationResult.success) {
+            console.log(`✅ [BLACKLIST] Certificate ${certId} revoked successfully`);
+          } else {
+            console.warn(`⚠️  [BLACKLIST] Certificate revocation failed for ${certId}: ${revocationResult.error}`);
+          }
+        } else {
+          console.log(`[BLACKLIST] Agent ${agentId} has no cert_id, skipping certificate revocation`);
+        }
+      } catch (certErr) {
+        console.error(`[BLACKLIST] Certificate revocation error for agent ${agentId}:`, certErr.message);
+        // Don't fail the blacklist operation if cert revocation fails
       }
 
       console.log(`🚫 Agent ${agentId} token blacklisted for ${ttl}s: ${reason}`);

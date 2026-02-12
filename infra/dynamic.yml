@@ -5,12 +5,6 @@ tls:
         certFile: /etc/traefik/certs/server.crt
         keyFile: /etc/traefik/certs/server.key
   
-  certificates:
-    - certFile: /etc/traefik/certs/server.crt
-      keyFile: /etc/traefik/certs/server.key
-    - certFile: /etc/traefik/certs/c2.gla1v3.local.crt
-      keyFile: /etc/traefik/certs/c2.gla1v3.local.key
-  
   options:
     default:
       minVersion: VersionTLS12
@@ -18,7 +12,7 @@ tls:
       minVersion: VersionTLS12
       clientAuth:
         caFiles:
-          - /etc/traefik/certs/ca.crt
+          - /ca-certs/ca-cert.pem
         clientAuthType: RequireAndVerifyClientCert
 
 http:

@@ -31,6 +31,19 @@ router.post('/logout', authenticateJWT, auditAction('logout'), (req, res) => {
   res.json({ message: 'Logged out successfully' });
 });
 
+// Verify token validity
+router.get('/verify', authenticateJWT, (req, res) => {
+  // If authenticateJWT middleware passes, token is valid
+  res.json({ 
+    valid: true, 
+    user: {
+      userId: req.user.userId,
+      username: req.user.username,
+      role: req.user.role
+    }
+  });
+});
+
 // Refresh token
 router.post('/refresh', authenticateJWT, async (req, res) => {
   try {

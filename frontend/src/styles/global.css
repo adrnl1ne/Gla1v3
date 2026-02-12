@@ -1118,3 +1118,13 @@ button.secondary:disabled {
 button {
   touch-action: manipulation;
 }
+
+/* Pulse animation for loading states */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}

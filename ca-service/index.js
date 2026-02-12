@@ -17,13 +17,34 @@ const CRL_PATH = path.join(CERT_DIR, 'crl.pem');
 // Certificate Revocation List (in-memory for MVP)
 const revokedCerts = new Set();
 
-// Initialize directories
+// Ensure CA exists
+async function ensureCA() {
+  const caKeyPath = path.join(CERT_DIR, 'ca-key.pem');
+  const caCertPath = path.join(CERT_DIR, 'ca-cert.pem');
+  
+  try {
+    await fs.access(caKeyPath);
+    await fs.access(caCertPath);
+    console.log('Root CA already exists');
+  } catch {
+    console.log('Generating root CA...');
+    await execPromise(`openssl genrsa -out ${caKeyPath} 4096`);
+    await execPromise(`openssl req -new -x509 -days 3650 -key ${caKeyPath} -out ${caCertPath} -subj "/CN=GLA1V3-CA/O=GLA1V3/OU=Security"`);
+    console.log('Root CA generated successfully');
+  }
+}
+
+// Initialize directories and CA
 (async () => {
   try {
     await fs.mkdir(SESSION_CERT_DIR, { recursive: true });
     console.log('Certificate directories initialized');
+    
+    // Generate root CA on startup
+    await ensureCA();
   } catch (err) {
-    console.error('Failed to create cert directories:', err);
+    console.error('Failed to initialize CA service:', err);
+    process.exit(1);
   }
 })();
 
@@ -59,17 +80,7 @@ app.post('/generate-cert', async (req, res) => {
     const caKeyPath = path.join(CERT_DIR, 'ca-key.pem');
     const caCertPath = path.join(CERT_DIR, 'ca-cert.pem');
     
-    // Check if CA exists, create if not
-    try {
-      await fs.access(caKeyPath);
-      await fs.access(caCertPath);
-    } catch {
-      console.log('Generating root CA...');
-      await execPromise(`openssl genrsa -out ${caKeyPath} 4096`);
-      await execPromise(`openssl req -new -x509 -days 3650 -key ${caKeyPath} -out ${caCertPath} -subj "/CN=GLA1V3-CA/O=GLA1V3/OU=Security"`);
-    }
-    
-    // Sign the certificate
+    // Sign the certificate (CA guaranteed to exist from startup)
     await execPromise(`openssl x509 -req -in ${csrPath} -CA ${caCertPath} -CAkey ${caKeyPath} -CAcreateserial -out ${certPath} -days ${Math.ceil(certTTL / 86400)} -sha256`);
     
     // Read generated cert and key

@@ -242,7 +242,11 @@ function Home({ token, user }) {
   // Calculate detection effectiveness
   const getDetectionStats = () => {
     if (stats.alerts.length === 0) {
-      return [{ label: 'No Data', value: 1, color: '#6e7681' }];
+      return [
+        { label: 'Detected', value: 0, color: '#1a7f37' },
+        { label: 'Suspicious', value: 0, color: '#9e6a03' },
+        { label: 'Evaded', value: 0, color: '#6e7681' }
+      ];
     }
     
     const detected = stats.alerts.filter(a => a.level >= 10).length;
@@ -253,7 +257,7 @@ function Home({ token, user }) {
       { label: 'Detected', value: detected, color: '#1a7f37' },
       { label: 'Suspicious', value: suspicious, color: '#9e6a03' },
       { label: 'Evaded', value: evaded, color: '#6e7681' }
-    ].filter(item => item.value > 0);
+    ];
   };
 
   // Calculate agent status
@@ -285,29 +289,37 @@ function Home({ token, user }) {
       { label: 'Active', value: active, color: '#3fb950' },
       { label: 'Inactive', value: inactive, color: '#d29922' },
       { label: 'Blacklisted', value: blacklisted, color: '#f85149' }
-    ].filter(item => item.value > 0);
+    ];
   };
 
   // Calculate OS distribution
   const getOSStats = () => {
     if (stats.agents.length === 0) {
-      return [{ label: 'No Data', value: 1, color: '#6e7681' }];
+      return [
+        { label: 'Linux', value: 0, color: '#1f6feb' },
+        { label: 'Windows', value: 0, color: '#da3633' },
+        { label: 'macOS', value: 0, color: '#8b949e' }
+      ];
     }
-    const osCounts = {};
+    const osCounts = { 'Linux': 0, 'Windows': 0, 'macOS': 0, 'Other': 0 };
     const osColors = { 'Linux': '#1f6feb', 'Windows': '#da3633', 'macOS': '#8b949e', 'Other': '#9e6a03' };
+    
     stats.agents.forEach(a => {
       const os = a.os || 'Unknown';
       const osType = os.toLowerCase().includes('windows') ? 'Windows' 
                    : os.toLowerCase().includes('linux') ? 'Linux'
                    : os.toLowerCase().includes('darwin') || os.toLowerCase().includes('mac') ? 'macOS'
                    : 'Other';
-      osCounts[osType] = (osCounts[osType] || 0) + 1;
+      osCounts[osType]++;
     });
-    return Object.entries(osCounts).map(([label, value]) => ({ 
-      label, 
-      value, 
-      color: osColors[label] || '#9e6a03' 
-    }));
+    
+    return Object.entries(osCounts)
+      .filter(([label]) => label !== 'Other' || osCounts.Other > 0)
+      .map(([label, value]) => ({ 
+        label, 
+        value, 
+        color: osColors[label] || '#9e6a03' 
+      }));
   };
 
   if (stats.loading) {

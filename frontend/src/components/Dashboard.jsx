@@ -57,11 +57,12 @@ export default function Dashboard({ user, token, onLogout }) {
     }
   };
 
-  const getColor = (lastSeen) => {
+  const getColor = (lastSeen, isBlacklisted = false) => {
+    if (isBlacklisted) return '#ff0000'; // Red for blacklisted
     const age = (Date.now() - new Date(lastSeen)) / 1000;
-    if (age < 30) return '#00ff00';
-    if (age < 120) return '#ffff00';
-    return '#ff0000';
+    if (age < 30) return '#00ff00'; // Green for active
+    if (age < 120) return '#ffff00'; // Yellow for recently seen
+    return '#ff0000'; // Red for inactive
   };
 
   const [showRaw, setShowRaw] = useState(false);
@@ -223,10 +224,13 @@ export default function Dashboard({ user, token, onLogout }) {
                 </thead>
                 <tbody>
                   {agents.map(a => {
-                    const status = getColor(a.lastSeen);
-                    const lat = Number(a.lat);
-                    const lng = Number(a.lng);
+                    const status = getColor(a.last_seen, a.is_blacklisted);
+                    const lat = Number(a.latitude || a.lat);
+                    const lng = Number(a.longitude || a.lng);
                     const hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
+                    const geoLocation = a.geo_city && a.geo_country 
+                      ? `${a.geo_city}, ${a.geo_country}` 
+                      : null;
                     return (
                       <tr key={a.id} style={{ borderBottom: '1px solid #30363d' }}>
                         <td style={{ padding: '0.8rem' }}>
@@ -235,12 +239,16 @@ export default function Dashboard({ user, token, onLogout }) {
                         <td style={{ padding: '0.8rem', fontFamily: 'monospace' }}>{a.id}</td>
                         <td style={{ padding: '0.8rem', color: '#ff7b72' }}>{a.cn}</td>
                         <td style={{ padding: '0.8rem', fontFamily: 'monospace', fontSize: '0.85rem' }}>
-                          {a.localIp && (<div style={{ color: '#ffa657' }}>L: {a.localIp}</div>)}
-                          <div style={{ color: '#79c0ff' }}>P: {a.ip}</div>
+                          <div style={{ color: '#79c0ff' }}>{a.ip_address || 'N/A'}</div>
+                          {geoLocation && (
+                            <div style={{ color: '#8b949e', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                              📍 {geoLocation}
+                            </div>
+                          )}
                         </td>
-                        <td style={{ padding: '0.8rem' }}>{new Date(a.lastSeen).toLocaleTimeString()}</td>
+                        <td style={{ padding: '0.8rem' }}>{new Date(a.last_seen).toLocaleString()}</td>
                         <td style={{ padding: '0.8rem', maxWidth: 240, whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                          <div style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}>{a.lastAction || '—'}</div>
+                          <div style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}>{a.last_action || '—'}</div>
                           <div style={{ color: '#9ae6b4', fontSize: '0.8rem', marginTop: '0.25rem' }}>{a.detection || ''} <span style={{ background: '#1f6feb', color: '#fff', padding: '2px 6px', borderRadius: 4, marginLeft: 6 }}>D3-PCA</span></div>
                           {a.geo && a.geo.note && (
                             <div style={{ color: '#f1c40f', fontSize: '0.8rem', marginTop: '0.25rem' }}>Geo note: {a.geo.note}</div>
