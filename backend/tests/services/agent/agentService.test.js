@@ -55,6 +55,19 @@ describe('AgentService', () => {
     expect(res).toEqual(expect.objectContaining({ id: 'agent-1', hostname: 'h2' }));
   });
 
+  test('handleBeacon continues when CAClient.generateCertificate throws', async () => {
+    AgentModel.findByCN.mockResolvedValue(null);
+    TenantModel.getDefault.mockResolvedValue({ id: 42 });
+    CAClient.generateCertificate.mockImplementation(() => { throw new Error('CA down'); });
+    AgentModel.register.mockResolvedValue({ id: 'agent-cafail', cert_id: null });
+
+    const agentData = { hostname: 'no-cert' };
+    const res = await AgentService.handleBeacon(agentData, null);
+
+    expect(AgentModel.register).toHaveBeenCalledWith(expect.objectContaining({ hostname: 'no-cert', cert_id: null }), 42);
+    expect(res.cert_id).toBeNull();
+  });
+
   test('handleBeacon - computes certFingerprint when clientCert provided', async () => {
     // Spy on native crypto to return a deterministic digest for the test
     const crypto = require('crypto');
@@ -78,9 +91,51 @@ describe('AgentService', () => {
     spy.mockRestore();
   });
 
+
+
   test('extractCNFromCert returns parse-error for invalid pem', () => {
-    const res = AgentService.extractCNFromCert('not-a-pem');
+    // Reload module to ensure no previous asn1 mock affects this test
+    jest.resetModules();
+    const AgentServiceFresh = require('../../../services/agentService');
+
+    const res = AgentServiceFresh.extractCNFromCert('not-a-pem');
     expect(res).toBe('parse-error');
+  });
+
+  test('extractCNFromCert returns unknown when CN contains only non-printable chars', () => {
+    jest.resetModules();
+    // Mock asn1.js to return a certificate with CN value containing non-printable bytes
+    jest.doMock('asn1.js', () => ({
+      define: () => ({
+        decode: () => ({
+          tbsCertificate: {
+            subject: [[{ type: [2,5,4,3], value: '\u0000\u0001' }]]
+          }
+        })
+      })
+    }));
+
+    const AgentServiceFresh = require('../../../services/agentService');
+    const res = AgentServiceFresh.extractCNFromCert('ignored-pem');
+    expect(res).toBe('unknown');
+  });
+
+  test('handleBeacon continues when crypto.createHash throws while computing fingerprint', async () => {
+    // Make createHash throw to exercise the fingerprint error path
+    const crypto = require('crypto');
+    const spy = jest.spyOn(crypto, 'createHash').mockImplementation(() => { throw new Error('hash-fail'); });
+
+    AgentModel.findByCN.mockResolvedValue(null);
+    TenantModel.getDefault.mockResolvedValue({ id: 11 });
+    CAClient.generateCertificate.mockResolvedValue({ certId: null });
+    AgentModel.register.mockResolvedValue({ id: 'agent-no-fp', certFingerprint: null });
+
+    const res = await AgentService.handleBeacon({ hostname: 'h-nofp' }, 'some-bad-pem');
+
+    expect(AgentModel.register).toHaveBeenCalled();
+    expect(res.certFingerprint).toBeNull();
+
+    spy.mockRestore();
   });
 
   test('getAllAgents delegates to AgentModel.getAll', async () => {
@@ -97,5 +152,21 @@ describe('AgentService', () => {
     const res = await AgentService.getAgent('friendly-cn');
     expect(res).toEqual({ id: 'bycn' });
     expect(AgentModel.findByCN).toHaveBeenCalledWith('friendly-cn');
+  });
+
+  test('getAgent returns agent when findById succeeds for UUID', async () => {
+    const uuid = '123e4567-e89b-12d3-a456-426614174000';
+    AgentModel.findById.mockResolvedValueOnce({ id: uuid });
+
+    const res = await AgentService.getAgent(uuid);
+    expect(res).toEqual({ id: uuid });
+    expect(AgentModel.findById).toHaveBeenCalledWith(uuid);
+  });
+
+  test('handleBeacon throws when no tenant available', async () => {
+    AgentModel.findByCN.mockResolvedValue(null);
+    TenantModel.getDefault.mockResolvedValue(null);
+
+    await expect(AgentService.handleBeacon({ hostname: 'x' }, null)).rejects.toThrow('No tenant available for agent registration');
   });
 });

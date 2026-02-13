@@ -100,15 +100,65 @@ describe('TaskQueueService', () => {
   test('subscribe/unsubscribe manage activeSubscriptions', async () => {
     const cb = jest.fn();
     redisClient.getKey.mockReturnValue('channel:agent');
-    redisClient.subscribe = jest.fn(async (ch, handler) => { /* no-op */ });
+
+    // simulate subscribe invoking the handler with valid JSON
+    redisClient.subscribe = jest.fn(async (ch, handler) => { handler(JSON.stringify({ type: 'NEW_TASK' })); });
     redisClient.unsubscribe = jest.fn(async (ch) => { /* no-op */ });
 
     const svc = new (require('../../../services/taskQueueService').constructor)();
     await svc.subscribeToAgentTasks('agent-1', 't1', cb);
     expect(svc.activeSubscriptions.size).toBe(1);
+    expect(cb).toHaveBeenCalledWith({ type: 'NEW_TASK' });
 
     await svc.unsubscribeFromAgentTasks('agent-1', 't1');
     expect(svc.activeSubscriptions.size).toBe(0);
+  });
+
+  test('subscribe handles parse error without throwing', async () => {
+    const cb = jest.fn();
+    redisClient.getKey.mockReturnValue('channel:agent');
+    redisClient.subscribe = jest.fn(async (ch, handler) => { handler('not-json'); });
+
+    const svc = new (require('../../../services/taskQueueService').constructor)();
+    await expect(svc.subscribeToAgentTasks('agent-2', 't2', cb)).resolves.not.toThrow();
+  });
+
+  test('broadcastTaskToTenant publishes to tenant channel', async () => {
+    redisClient.getKey.mockReturnValue('channel:tenant:broadcast:1');
+    redisClient.publish.mockResolvedValue(1);
+
+    const res = await TaskQueueService.broadcastTaskToTenant({ task_id: 'b1' }, 1);
+    expect(redisClient.publish).toHaveBeenCalled();
+    expect(res.success).toBe(true);
+  });
+
+  test('clearAgentQueue deletes both keys', async () => {
+    redisClient.getKey.mockReturnValue('queue:agent');
+    redisClient.del = jest.fn().mockResolvedValue(1);
+
+    const res = await TaskQueueService.clearAgentQueue('agent-x', 1);
+    expect(redisClient.del).toHaveBeenCalled();
+    expect(res.success).toBe(true);
+  });
+
+  test('getTenantQueueStats aggregates keys and lengths', async () => {
+    redisClient.getKey.mockReturnValue('queue:agent:*:1');
+    redisClient.keys = jest.fn().mockResolvedValue(['queue:agent:agent-A:1', 'queue:agent:agent-B:1']);
+    redisClient.lLen.mockImplementation((key) => Promise.resolve(key.includes('A') ? 2 : 3));
+
+    const stats = await TaskQueueService.getTenantQueueStats(1);
+    expect(stats.totalPending).toBe(5);
+    expect(stats.agentCount).toBe(2);
+    expect(stats.agentStats.length).toBe(2);
+  });
+
+  test('getTenantQueueStats returns defaults on error', async () => {
+    redisClient.getKey.mockReturnValue('queue:agent:*:1');
+    redisClient.keys = jest.fn().mockImplementation(() => { throw new Error('redis error'); });
+
+    const stats = await TaskQueueService.getTenantQueueStats(1);
+    expect(stats.totalPending).toBe(0);
+    expect(stats.agentCount).toBe(0);
   });
 
   test('getQueueLength returns lLen result', async () => {

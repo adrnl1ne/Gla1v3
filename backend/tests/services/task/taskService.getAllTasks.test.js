@@ -21,4 +21,26 @@ describe('TaskService.getAllTasks', () => {
     expect(res[0].result).toBe('ok');
     expect(res[0].type).toBe('embedded');
   });
+
+  test('handles missing latest result and embedded-type normalization', async () => {
+    TaskModel.getAllForAgent.mockResolvedValue([{ id: 't2', task_type: 'embedded', embedded_type: 'startup' }]);
+    ResultModel.getLatestForTask.mockResolvedValue(null);
+
+    const res = await TaskService.getAllTasks('agent-2');
+    expect(res[0].result).toBeNull();
+    expect(res[0].error).toBeNull();
+    expect(res[0].type).toBe('embedded');
+    expect(res[0].embeddedType).toBe('startup');
+  });
+
+  test('maps command tasks and exposes error when present', async () => {
+    TaskModel.getAllForAgent.mockResolvedValue([{ id: 't3', task_type: 'command', command: 'whoami' }]);
+    ResultModel.getLatestForTask.mockResolvedValue({ stdout: null, error_message: 'failed' });
+
+    const res = await TaskService.getAllTasks('agent-3');
+    expect(res[0].type).toBe('command');
+    expect(res[0].command).toBe('whoami');
+    expect(res[0].result).toBeNull();
+    expect(res[0].error).toBe('failed');
+  });
 });
