@@ -1,8 +1,8 @@
 // Authentication Service
 const jwt = require('jsonwebtoken');
 const UserModel = require('../models/User');
-const TenantModel = require('../models/Tenant');
 const TwoFactorService = require('./twoFactorService');
+// TenantModel is required lazily inside initializeDefaultAdmin to avoid loading DB connection in unit tests
 const SessionService = require('./sessionService');
 const { config } = require('../config/env');
 
@@ -82,6 +82,9 @@ class AuthService {
   
   static async initializeDefaultAdmin() {
     try {
+      // Require TenantModel lazily to avoid DB connection during unit tests
+      const TenantModel = require('../models/Tenant');
+
       // Check if admin already exists
       const existingAdmin = await UserModel.findByUsername('admin');
       if (existingAdmin) {
