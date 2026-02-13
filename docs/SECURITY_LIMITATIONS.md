@@ -40,13 +40,14 @@ Note: the backend no longer accepts `X-Tenant-API-Key` as an authentication fall
   - Push updated certs to deployed agents
   - Implement short-lived certificates (e.g., 24-hour renewal)
 
-#### 3. **NO Automatic Certificate Revocation**
+#### 3. **Certificate Revocation (Phase‑1: automated on blacklist) — UPDATED**
 - When an agent is blacklisted via Redis:
   - ✅ Agent ID is blocked (403 Forbidden on beacon)
-  - ❌ Certificate is NOT revoked in CA service
-  - ❌ Certificate remains valid in mTLS
-- **Security Gap**: Blacklisted agent's cert could theoretically be used elsewhere
-- **Mitigation**: Traefik mTLS + beacon blacklist check provides defense-in-depth
+  - ✅ **CA‑issued certs** (tracked via `cert_id`) are revoked automatically when the agent is blacklisted (backend calls CA `/revoke-cert`).
+  - ✅ **Embedded cert fingerprints** can now be recorded at beacon and treated as revocation targets (feature flag `ENABLE_EMBEDDED_CERT_REVOCATION`). Blacklisted fingerprints are rejected at the application layer.
+  - ⚠️ Certificate may still be accepted at the TLS layer unless Traefik is configured to consult a CRL (infra work remaining)
+- **Security note**: Phase‑1 (automatic revocation on blacklist) is complete — CA-issued certs are revoked and embedded-cert fingerprints are tracked & rejected at the application layer. Remaining work: TLS‑layer CRL enforcement and broader infra integration.
+- **Mitigation**: Traefik mTLS + backend blacklist/fingerprint checks provide strong defense-in-depth while CRL enforcement is planned.
 
 ---
 
@@ -88,9 +89,9 @@ When you blacklist an agent via the dashboard:
    ```
 
 Note: Agents now defer execution of build-time embedded "startup" tasks until after the agent's first successful beacon. This prevents unauthenticated or pre-registration embedded-results from being sent to the server before the agent is validated.
-- CA service has `/revoke-cert` endpoint but it's not automatically called
-- Agent's embedded cert remains valid
-- No CRL (Certificate Revocation List) enforcement in Traefik
+- CA service `/revoke-cert` **is now invoked automatically for tracked CA-issued certs** when an agent is blacklisted (Phase‑1 completed)
+- Embedded cert fingerprints can be recorded and rejected by the backend when `ENABLE_EMBEDDED_CERT_REVOCATION` is enabled
+- TLS-layer CRL/OCSP enforcement in Traefik is still pending (infra work)
 
 ❌ **Token Rotation**:
 - Tenant API key is not rotated
@@ -164,10 +165,20 @@ GET /certs
 
 ### Certificate revocation integration — current status
 
-- ✅ **CA revocation is invoked automatically for CA‑issued (tracked) certificates** when an agent row contains `cert_id` (backend calls `/revoke-cert`).
-- ⚠️ **Embedded certificates** (build‑time) were previously untracked; the backend can now optionally record an embedded cert's SHA256 `cert_fingerprint` at beacon and record that fingerprint when an agent is blacklisted (feature‑flag `ENABLE_EMBEDDED_CERT_REVOCATION`). Blacklisted fingerprints are rejected at the beacon endpoint immediately.
+- ✅ **Phase‑1 (completed)** — Automatic revocation on blacklist:
+  - CA‑issued (tracked) certificates: backend now calls the CA `/revoke-cert` for `cert_id` when an agent is blacklisted.
+  - Embedded certificates: when `ENABLE_EMBEDDED_CERT_REVOCATION` is enabled the agent's embedded cert fingerprint (SHA‑256) is stored and blacklist operations add that fingerprint to Redis; the backend rejects beacons/embedded-results matching revoked fingerprints.
+  - Database/Redis upsert for blacklist entries was hardened (ON CONFLICT on agent_id+tenant_id) so blacklist writes are reliable.
 
-**Note:** Full TLS‑layer CRL enforcement still requires Traefik/infra changes or migrating agents to CA‑issued certs.
+- ⚠️ **Remaining gap**: TLS‑layer CRL enforcement (Traefik) is not yet implemented — revocation is enforced at the application layer for now.
+
+**Short revocation flow (Phase‑1)**
+1. Operator blacklists agent via dashboard → backend upserts blacklist row + (if available) stores cert fingerprint and triggers CA revoke for `cert_id`.
+2. Backend writes blacklist entry into Redis (fast enforcement).
+3. Traefik mTLS still validates TLS handshakes, but beacon/embedded endpoints check Redis + fingerprint and return 403/403 accordingly.
+4. Agent is blocked immediately at the application layer; CA record is revoked for tracked certs.
+
+**Note:** Full crypto‑layer enforcement (CRL/OCSP) is planned as Phase‑2.
 
 ### Certificate Types
 
@@ -274,7 +285,7 @@ When documenting your Redis implementation:
 **Limitations to Acknowledge**:
 - Static credentials (embedded at build time)
 - No dynamic token/cert rotation
-- Certificate revocation not automated
+- Certificate revocation: **partially automated (Phase‑1)** — CA revoke + embedded-cert fingerprint tracking implemented; TLS‑layer CRL enforcement still pending
 - Recommendation for future dynamic credential management
 
 ---
@@ -320,7 +331,7 @@ When documenting your Redis implementation:
 | Multi-Tenant Isolation | ✅ Implemented | **High** |
 | Cache Invalidation | ✅ Implemented | **High** |
 | Auto-Expiration | ✅ Implemented | **Medium** |
-| Certificate Revocation | ❌ Not Implemented | N/A |
+| Certificate Revocation | ✅ Partially (Phase‑1) | **Medium** (app‑layer enforcement) |
 | Token Rotation | ❌ Not Implemented | N/A |
 | Dynamic Credentials | ❌ Not Implemented | N/A |
 
@@ -360,6 +371,6 @@ When documenting your Redis implementation:
 
 ---
 
-**Last Updated**: 2026-02-10  
+**Last Updated**: 2026-02-13  
 **Project**: Gla1v3 Multi-Tenant C2 Framework  
 **Author**: Security Architecture Documentation
