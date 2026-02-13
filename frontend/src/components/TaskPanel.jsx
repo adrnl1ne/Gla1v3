@@ -8,6 +8,7 @@ export default function TaskPanel({ agent, token, onClose }) {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showTaskModal, setShowTaskModal] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   // Helper utilities (normalize API shapes and timestamps)
   const getAuthToken = () => token || localStorage.getItem('gla1v3_token');
@@ -33,6 +34,12 @@ export default function TaskPanel({ agent, token, onClose }) {
     const interval = setInterval(fetchTasks, 12000); // Reduced frequency to avoid 429 errors
     return () => clearInterval(interval);
   }, [agent?.id]);
+
+  // Ensure we always load fresh tasks when the panel is mounted (so the
+  // compact 5-item history shows current DB-backed data on open).
+  useEffect(() => {
+    fetchTasks();
+  }, []);
 
   const fetchTasks = async () => {
     try {
@@ -290,14 +297,17 @@ export default function TaskPanel({ agent, token, onClose }) {
             <div style={{ background: '#161b22', borderRadius: 8, padding: '1rem', border: '1px solid #30363d', flex: 1, overflow: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                 <h3 style={{ margin: 0, color: '#58a6ff', fontSize: '1rem' }}>Task History</h3>
-                <button onClick={fetchTasks} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.85rem' }}>Refresh</button>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <button onClick={fetchTasks} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.85rem' }}>Refresh</button>
+                  <button onClick={() => { fetchTasks(); setShowAll(true); }} style={{ background: 'transparent', border: '1px dashed #30363d', color: '#8b949e', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.85rem' }}>Show all</button>
+                </div>
               </div>
 
               {!Array.isArray(tasks) || tasks.length === 0 ? (
                 <div style={{ color: '#8b949e', textAlign: 'center', padding: '2rem', fontStyle: 'italic' }}>No tasks yet. Send a command to get started.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  {tasks.map(task => (
+                  {tasks.slice(0,5).map(task => (
                     <div key={task.id} style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: 6, padding: '0.75rem' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                         <div style={{ fontFamily: 'monospace', color: '#79c0ff', fontSize: '0.9rem' }}>
@@ -320,16 +330,30 @@ export default function TaskPanel({ agent, token, onClose }) {
                             <span>{task.cmd} {getArgsString(task)}</span>
                           )}
                         </div>
-                        <span style={{ 
-                          padding: '2px 8px', 
-                          borderRadius: 4, 
-                          fontSize: '0.75rem',
-                          fontWeight: '600',
-                          background: task.status === 'completed' ? '#238636' : task.status === 'failed' ? '#da3633' : '#6e40c9',
-                          color: '#fff'
-                        }}>
-                          {task.status}
-                        </span>
+                        {/* If agent is blacklisted, show explicit label for pending/sent tasks */}
+                        {agent?.is_blacklisted && (task.status === 'pending' || task.status === 'sent') ? (
+                          <span style={{ 
+                            padding: '2px 8px', 
+                            borderRadius: 4, 
+                            fontSize: '0.75rem',
+                            fontWeight: '700',
+                            background: '#ff0000',
+                            color: '#fff'
+                          }}>
+                            agent blacklisted
+                          </span>
+                        ) : (
+                          <span style={{ 
+                            padding: '2px 8px', 
+                            borderRadius: 4, 
+                            fontSize: '0.75rem',
+                            fontWeight: '600',
+                            background: task.status === 'completed' ? '#238636' : task.status === 'failed' ? '#da3633' : '#6e40c9',
+                            color: '#fff'
+                          }}>
+                            {task.status}
+                          </span>
+                        )}
                       </div>
                       
                       {(() => {
@@ -427,6 +451,42 @@ export default function TaskPanel({ agent, token, onClose }) {
             }
           }}
         />
+      )}
+
+      {/* Full task history modal (opened by "Show all") */}
+      {showAll && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
+          <div style={{ width: '90vw', maxWidth: '1100px', maxHeight: '90vh', background: '#0f1720', borderRadius: 12, overflow: 'auto', padding: '1rem', border: '1px solid #30363d' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, color: '#58a6ff' }}>All Task History — {agent.id}</h3>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button onClick={() => { setShowAll(false); }} style={{ background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '6px 10px', borderRadius: 6, cursor: 'pointer' }}>Close</button>
+                <button onClick={fetchTasks} style={{ background: 'transparent', border: '1px solid #30363d', color: '#8b949e', padding: '6px 10px', borderRadius: 6, cursor: 'pointer' }}>Refresh</button>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              {tasks.map(t => (
+                <div key={t.id} style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: 6, padding: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ color: '#79c0ff', fontFamily: 'monospace' }}>{t.type === 'embedded' ? (getTaskById(t.embeddedType || t.taskType)?.label || (t.embeddedType || t.taskType)) : (t.cmd || t.command)}</div>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      {agent?.is_blacklisted && (t.status === 'pending' || t.status === 'sent') ? (
+                        <span style={{ background: '#ff0000', color: '#fff', padding: '2px 8px', borderRadius: 4, fontWeight: '700', fontSize: '0.75rem' }}>agent blacklisted</span>
+                      ) : (
+                        <span style={{ background: t.status === 'completed' ? '#238636' : t.status === 'failed' ? '#da3633' : '#6e40c9', color: '#fff', padding: '2px 8px', borderRadius: 4, fontSize: '0.75rem', fontWeight: '600' }}>{t.status}</span>
+                      )}
+                      <div style={{ color: '#6e7681', fontSize: '0.8rem' }}>{new Date(t.createdAt || t.created_at).toLocaleString()}</div>
+                    </div>
+                  </div>
+
+                  {(t.stdout || t.result) && (
+                    <pre style={{ marginTop: '0.5rem', background: '#010409', padding: '0.5rem', borderRadius: 4, color: '#c9d1d9', maxHeight: '200px', overflow: 'auto', whiteSpace: 'pre-wrap' }}>{t.stdout || t.result}</pre>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

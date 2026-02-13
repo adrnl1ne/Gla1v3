@@ -15,6 +15,8 @@ go build -ldflags "
 
 This means each built agent has **static, hardcoded credentials** that cannot be changed without recompiling.
 
+Note: the backend no longer accepts `X-Tenant-API-Key` as an authentication fallback for agent endpoints — mTLS is required for agent authentication.
+
 ---
 
 ## Token & Certificate Rotation
@@ -85,9 +87,7 @@ When you blacklist an agent via the dashboard:
    🚫 [BEACON] BLOCKED - Agent abc123 is blacklisted: Compromised
    ```
 
-### What Does NOT Happen
-
-❌ **Certificate Revocation**:
+Note: Agents now defer execution of build-time embedded "startup" tasks until after the agent's first successful beacon. This prevents unauthenticated or pre-registration embedded-results from being sent to the server before the agent is validated.
 - CA service has `/revoke-cert` endpoint but it's not automatically called
 - Agent's embedded cert remains valid
 - No CRL (Certificate Revocation List) enforcement in Traefik
@@ -162,11 +162,12 @@ GET /crl
 GET /certs
 ```
 
-### ❌ Not Integrated with Blacklist
+### Certificate revocation integration — current status
 
-Currently, blacklisting an agent **does not** call `/revoke-cert`.
+- ✅ **CA revocation is invoked automatically for CA‑issued (tracked) certificates** when an agent row contains `cert_id` (backend calls `/revoke-cert`).
+- ⚠️ **Embedded certificates** (build‑time) were previously untracked; the backend can now optionally record an embedded cert's SHA256 `cert_fingerprint` at beacon and record that fingerprint when an agent is blacklisted (feature‑flag `ENABLE_EMBEDDED_CERT_REVOCATION`). Blacklisted fingerprints are rejected at the beacon endpoint immediately.
 
-**Reason**: Agents use embedded certs (no `certId` tracking), not dynamically issued session certs.
+**Note:** Full TLS‑layer CRL enforcement still requires Traefik/infra changes or migrating agents to CA‑issued certs.
 
 ### Certificate Types
 

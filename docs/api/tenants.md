@@ -355,7 +355,7 @@ curl -X POST https://api.gla1v3.local/api/users \
   }'
 
 # 3. Build tenant-specific agent (future feature)
-# Agent will use tenant API key to register automatically
+# Agent build may embed a tenant API key, but the backend no longer accepts this key for authentication — mTLS is required for agent registration
 ```
 
 ### Assign Existing User to Multiple Clients

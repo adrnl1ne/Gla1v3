@@ -8,6 +8,23 @@ class AgentService {
   static async handleBeacon(agentData, clientCert, tenantId = null) {
     const agentId = agentData.id || this.extractCNFromCert(clientCert);
     const cn = agentData.cn || this.extractCNFromCert(clientCert);
+
+    // If a client certificate PEM is present, compute its SHA256 fingerprint so
+    // embedded certs can be tracked and revoked via blacklist.
+    if (clientCert) {
+      try {
+        const crypto = require('crypto');
+        const b64 = clientCert.replace(/-----BEGIN CERTIFICATE-----/g, '')
+                              .replace(/-----END CERTIFICATE-----/g, '')
+                              .replace(/[\r\n\s]/g, '');
+        const der = Buffer.from(b64, 'base64');
+        const fp = crypto.createHash('sha256').update(der).digest('hex');
+        agentData.certFingerprint = fp;
+      } catch (e) {
+        // Non-fatal; continue without fingerprint
+        console.warn('[AGENT] Failed to compute cert fingerprint:', e.message);
+      }
+    }
     
     // Look up agent by CN (certificate common name) instead of agent-provided ID
     let agent = await AgentModel.findByCN(cn, tenantId);
@@ -113,7 +130,10 @@ class AgentService {
       for (const rdn of cert.tbsCertificate.subject) {
         for (const attr of rdn) {
           if (attr.type.join('.') === '2.5.4.3') {
-            return attr.value.toString();
+            // Sanitize CN: strip non-printable/control characters and trim
+            const raw = String(attr.value || '');
+            const cleaned = raw.replace(/[^\x20-\x7E]/g, '').trim();
+            return cleaned || 'unknown';
           }
         }
       }

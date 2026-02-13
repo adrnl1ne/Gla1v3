@@ -57,11 +57,16 @@ class TokenBlacklistService {
       // Persist to database for Redis restart resilience
       const expiresAt = new Date(Date.now() + ttl * 1000);
       try {
+        // Use column-based ON CONFLICT so persistence works regardless of which
+        // migration/schema variant is applied (PK on (agent_id, tenant_id) or
+        // a constraint named `unique_active_blacklist`). This is more resilient
+        // across developer environments and avoids the runtime error seen when
+        // the named constraint is missing.
         await query(
           `INSERT INTO agent_blacklist (agent_id, tenant_id, reason, expires_at)
            VALUES ($1, $2, $3, $4)
-           ON CONFLICT ON CONSTRAINT unique_active_blacklist
-           DO UPDATE SET reason = $3, expires_at = $4, blacklisted_at = NOW()`,
+           ON CONFLICT (agent_id, tenant_id)
+           DO UPDATE SET reason = EXCLUDED.reason, expires_at = EXCLUDED.expires_at, blacklisted_at = NOW()`,
           [agentId, tenantId, reason, expiresAt]
         );
         console.log(`[BLACKLIST] Persisted to database: agent ${agentId}`);
@@ -72,7 +77,7 @@ class TokenBlacklistService {
       // Automatically revoke certificate if agent has one
       try {
         const agentResult = await query(
-          'SELECT cert_id FROM agents WHERE id = $1',
+          'SELECT cert_id, cert_fingerprint FROM agents WHERE id = $1',
           [agentId]
         );
         
@@ -89,6 +94,24 @@ class TokenBlacklistService {
           }
         } else {
           console.log(`[BLACKLIST] Agent ${agentId} has no cert_id, skipping certificate revocation`);
+        }
+
+        // Feature: revoke embedded certs by fingerprint (feature-flag guarded)
+        const { config } = require('../config/env');
+        if (config.enableEmbeddedCertRevocation && agentResult.rows.length > 0 && agentResult.rows[0].cert_fingerprint) {
+          try {
+            const fingerprint = agentResult.rows[0].cert_fingerprint;
+            const key = redisClient.getKey('blacklist:cert:fingerprint', fingerprint, tenantId);
+            // Store a short metadata payload under the fingerprint key so checks are O(1)
+            await redisClient.set(key, JSON.stringify({ reason, blacklistedAt: new Date().toISOString() }), ttl);
+            // Also add a global key for quick lookup across tenants
+            const globalKey = redisClient.getKey('blacklist:cert:fingerprint', fingerprint);
+            await redisClient.set(globalKey, JSON.stringify({ reason, blacklistedAt: new Date().toISOString() }), ttl);
+
+            console.log(`[BLACKLIST] Stored revoked cert fingerprint for agent ${agentId}: ${fingerprint}`);
+          } catch (fpErr) {
+            console.error('[BLACKLIST] Failed to store revoked cert fingerprint:', fpErr.message);
+          }
         }
       } catch (certErr) {
         console.error(`[BLACKLIST] Certificate revocation error for agent ${agentId}:`, certErr.message);
@@ -148,6 +171,30 @@ class TokenBlacklistService {
     } catch (error) {
       console.error('Error getting blacklist info:', error);
       return null;
+    }
+  }
+
+  /**
+   * Check if a certificate fingerprint has been revoked (embedded certs)
+   * @param {string} fingerprint - hex SHA256 fingerprint
+   * @param {number|null} tenantId - optional tenant scoping
+   */
+  async isCertFingerprintRevoked(fingerprint, tenantId = null) {
+    try {
+      if (!fingerprint) return false;
+      // Check tenant-scoped key first
+      if (tenantId) {
+        const key = redisClient.getKey('blacklist:cert:fingerprint', fingerprint, tenantId);
+        const exists = await redisClient.exists(key);
+        if (exists === 1) return true;
+      }
+      // Check global key
+      const globalKey = redisClient.getKey('blacklist:cert:fingerprint', fingerprint);
+      const gExists = await redisClient.exists(globalKey);
+      return gExists === 1;
+    } catch (err) {
+      console.error('Error checking cert fingerprint blacklist:', err.message);
+      return false;
     }
   }
 

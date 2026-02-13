@@ -160,12 +160,11 @@ router.post('/beacon', async (req, res) => {
     const clientCert = req.headers['x-forwarded-tls-client-cert'];
     const certInfo = req.headers['x-forwarded-tls-client-cert-info'];
     const agentId = req.headers['x-agent-id'];  // Read agent ID from header
-    const tenantAPIKey = req.headers['x-tenant-api-key'];  // Read tenant API key from header
-    
+
     if (!clientCert) {
       return res.status(401).json({ error: 'Client certificate required' });
     }
-    
+
     // Extract CN from Traefik headers (URL-encoded)
     let cn = 'unknown';
     if (certInfo) {
@@ -177,30 +176,13 @@ router.post('/beacon', async (req, res) => {
     } else if (clientCert) {
       cn = AgentService.extractCNFromCert(clientCert);
     }
-    
+
     // Merge header ID into body data
     agentData.id = agentId || agentData.id;
     agentData.cn = cn;
-    
-    // Determine tenant ID from API key or use default
+
+    // Tenant ID no longer comes from X-Tenant-API-Key (fallback removed) — default to null
     let tenantId = null;
-    if (tenantAPIKey) {
-      // Check cache first
-      tenantId = await cacheService.getTenantByApiKey(tenantAPIKey);
-      
-      if (!tenantId) {
-        const TenantModel = require('../models/Tenant');
-        const tenant = await TenantModel.findByApiKey(tenantAPIKey);
-        if (tenant) {
-          tenantId = tenant.id;
-          // Cache for future lookups
-          await cacheService.cacheTenantApiKey(tenantAPIKey, tenantId);
-          console.log(`[BEACON] Agent ${agentData.id} identified with tenant: ${tenant.name}`);
-        } else {
-          console.log(`[BEACON] Invalid tenant API key provided, using default tenant`);
-        }
-      }
-    }
     
     // Determine IP (prefer publicIp from agent, fallback to x-forwarded-for)
     const providedPublic = agentData.publicIp ? String(agentData.publicIp).trim() : null;
@@ -209,11 +191,33 @@ router.post('/beacon', async (req, res) => {
     const ipNorm = String(ipRaw).split(',')[0].trim().replace(/^.*:/, '');
     agentData.ip = ipNorm;
     
+    // If enabled, check cert fingerprint blacklist immediately (pre-beacon tenant lookup)
+    const crypto = require('crypto');
+    let incomingFingerprint = null;
+    if (clientCert) {
+      try {
+        const b64 = clientCert.replace(/-----BEGIN CERTIFICATE-----/g, '')
+                              .replace(/-----END CERTIFICATE-----/g, '')
+                              .replace(/[\r\n\s]/g, '');
+        const der = Buffer.from(b64, 'base64');
+        incomingFingerprint = crypto.createHash('sha256').update(der).digest('hex');
+
+        const fpRevoked = await tokenBlacklistService.isCertFingerprintRevoked(incomingFingerprint, null);
+        if (fpRevoked) {
+          console.log(`🚫 [BEACON] BLOCKED - Incoming certificate fingerprint is revoked: ${incomingFingerprint}`);
+          return res.status(403).json({ error: 'Certificate revoked' });
+        }
+      } catch (e) {
+        console.warn('[BEACON] Failed to compute incoming cert fingerprint:', e.message);
+      }
+    }
+
     const agent = await AgentService.handleBeacon(agentData, clientCert, tenantId);
     
     // CHECK BLACKLIST - Reject if agent is compromised
     // This check must happen AFTER handleBeacon so we have agent.tenant_id
     if (agent && agent.id && agent.tenant_id) {
+      // Agent-id blacklist check
       const isBlacklisted = await tokenBlacklistService.isAgentBlacklisted(agent.id, agent.tenant_id);
       if (isBlacklisted) {
         const blacklistInfo = await tokenBlacklistService.getBlacklistInfo(agent.id, agent.tenant_id);
@@ -223,6 +227,15 @@ router.post('/beacon', async (req, res) => {
           reason: blacklistInfo?.reason || 'Compromised',
           blacklistedAt: blacklistInfo?.blacklistedAt
         });
+      }
+
+      // Tenant-scoped fingerprint check (in case fingerprint was not global)
+      if (incomingFingerprint) {
+        const fpRevokedTenant = await tokenBlacklistService.isCertFingerprintRevoked(incomingFingerprint, agent.tenant_id);
+        if (fpRevokedTenant) {
+          console.log(`🚫 [BEACON] BLOCKED - Certificate fingerprint revoked for tenant ${agent.tenant_id}: ${incomingFingerprint}`);
+          return res.status(403).json({ error: 'Certificate revoked (tenant scope)' });
+        }
       }
     }
     
@@ -538,16 +551,15 @@ router.post('/:agentId/embedded-tasks', async (req, res) => {
   const { agentId } = req.params;
   const { results } = req.body;
   const clientCert = req.headers['x-forwarded-tls-client-cert'];
-  const tenantApiKeyHeader = req.headers['x-tenant-api-key'] || req.headers['x-tenant-api-key'.toLowerCase()];
   
   if (!results || !Array.isArray(results)) {
     return res.status(400).json({ error: 'Missing results array' });
   }
 
-  // Authentication: prefer mTLS client cert (Traefik header). As a controlled fallback for
-  // development/local scenarios where Traefik may not forward the cert, allow the agent to
-  // authenticate with a valid tenant API key + agentId match.
+  // Authentication: require mTLS client certificate (Traefik forwards the client cert).
   let agent = null;
+  let incomingFingerprint = null;
+
   if (clientCert) {
     // Extract CN from client certificate to properly identify the agent
     const cn = AgentService.extractCNFromCert(clientCert);
@@ -557,27 +569,37 @@ router.post('/:agentId/embedded-tasks', async (req, res) => {
       console.log(`[EmbeddedTasks] Agent not found for CN: ${cn}, skipping persistence`);
       return res.json({ success: true, received: results.length, processed: 0 });
     }
-  } else if (tenantApiKeyHeader) {
-    // Fallback: validate tenant API key and agentId pairing (development convenience only)
+
+    // compute fingerprint and immediately reject if fingerprint is revoked
     try {
-      const TenantModel = require('../models/Tenant');
-      const tenant = await TenantModel.findByApiKey(tenantApiKeyHeader);
-      if (!tenant) {
-        return res.status(401).json({ error: 'Invalid tenant API key' });
+      const pem = clientCert.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\n/g, '');
+      const der = Buffer.from(pem, 'base64');
+      incomingFingerprint = require('crypto').createHash('sha256').update(der).digest('hex');
+      const fpRevokedGlobal = await tokenBlacklistService.isCertFingerprintRevoked(incomingFingerprint, null);
+      const fpRevokedTenant = await tokenBlacklistService.isCertFingerprintRevoked(incomingFingerprint, agent.tenant_id);
+      if (fpRevokedGlobal || fpRevokedTenant) {
+        console.log(`🚫 [EMBEDDED-TASKS] BLOCKED - Certificate fingerprint revoked: ${incomingFingerprint}`);
+        return res.status(403).json({ error: 'Certificate revoked' });
       }
-      // Look up agent by provided agentId and ensure it belongs to the tenant
-      const maybeAgent = await AgentModel.findById(agentId);
-      if (!maybeAgent || maybeAgent.tenant_id !== tenant.id) {
-        return res.status(401).json({ error: 'Agent not associated with provided tenant API key' });
-      }
-      agent = maybeAgent;
-      console.warn(`[EmbeddedTasks] Using tenant-API-key fallback to authenticate embedded results for agent ${agentId}`);
-    } catch (fallbackErr) {
-      console.error('[EmbeddedTasks] Tenant API key fallback error:', fallbackErr.message);
-      return res.status(401).json({ error: 'Authentication failed' });
+    } catch (e) {
+      console.warn('[EmbeddedTasks] Failed to compute incoming cert fingerprint:', e.message);
     }
+
   } else {
     return res.status(401).json({ error: 'Client certificate required' });
+  }
+
+  // If agent is blacklisted in Redis, reject embedded results immediately
+  try {
+    const isBlacklisted = await tokenBlacklistService.isAgentBlacklisted(agent.id, agent.tenant_id);
+    if (isBlacklisted) {
+      console.log(`🚫 [EMBEDDED-TASKS] BLOCKED - Agent ${agent.id} is blacklisted`);
+      return res.status(403).json({ error: 'Agent blacklisted' });
+    }
+  } catch (err) {
+    console.error('[EMBEDDED-TASKS] Failed to check blacklist status:', err.message);
+    // If Redis fails, fail closed for security
+    return res.status(500).json({ error: 'Blacklist check failed' });
   }
 
   console.log(`[EmbeddedTasks] Received ${results.length} task results from agent: ${agentId}`);
@@ -631,11 +653,28 @@ router.post('/:agentId/embedded-tasks', async (req, res) => {
 
           try {
             const allTasks = await TaskModel.getAllForAgent(resolvedAgentId);
+
+            // 1) Try exact-match on embedded_type + params (strict equality)
             targetTask = allTasks.find(t => (
               (t.embedded_type === taskType) &&
               (t.status === 'pending' || t.status === 'sent') &&
               JSON.stringify(t.embedded_params || {}) === JSON.stringify(params || {})
             ));
+
+            // 2) If no exact match, fall back to the most-recent pending/sent task
+            //    with the same embedded_type. This covers minor param-normalization
+            //    differences (path normalization, ordering, etc.) and prevents
+            //    duplicate persisted tasks from appearing in the UI.
+            if (!targetTask) {
+              targetTask = allTasks.find(t => (
+                (t.embedded_type === taskType) &&
+                (t.status === 'pending' || t.status === 'sent')
+              ));
+
+              if (targetTask) {
+                console.warn(`[EmbeddedTasks] Relaxed-match attached to existing task ${targetTask.id} (embedded_type=${taskType}) — params did not strictly match`);
+              }
+            }
           } catch (lookupErr) {
             // If lookup fails, fall back to creating a new task (best-effort)
             console.warn('[EmbeddedTasks] Failed to lookup existing task for result — will create new one:', lookupErr.message);

