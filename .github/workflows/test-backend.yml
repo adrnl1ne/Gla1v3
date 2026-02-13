@@ -1,0 +1,68 @@
+name: CI — backend & frontend checks
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+
+jobs:
+  checks:
+    name: Run checks (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Cache backend npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: backend-node-${{ matrix.node-version }}-${{ hashFiles('backend/package-lock.json') }}
+          restore-keys: |
+            backend-node-${{ matrix.node-version }}-
+
+      - name: Install backend deps
+        run: npm ci --prefix backend
+
+      - name: Backend lint
+        run: npm --prefix backend run lint
+
+      - name: Run backend unit tests (coverage + threshold)
+        run: |
+          npm --prefix backend test -- --coverage --coverageThreshold='{"global":{"branches":60,"functions":60,"lines":60,"statements":60}}'
+        env:
+          CI: true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/coverage/lcov.info
+          fail_ci_if_error: true
+
+      - name: Cache frontend npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: frontend-node-${{ matrix.node-version }}-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            frontend-node-${{ matrix.node-version }}-
+
+      - name: Install frontend deps
+        run: npm ci --prefix frontend
+
+      - name: Frontend build (sanity check)
+        run: npm --prefix frontend run build
+

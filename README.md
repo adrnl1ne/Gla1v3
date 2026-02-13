@@ -36,6 +36,20 @@ Every component uses encryption and authentication. Agent communications use mut
 
 Gla1v3 is actively developed and suitable for testing environments. Core features are stable, with continuous improvements to agent capabilities and EDR integrations.
 
+**CI & coverage**
+
+- Backend unit tests run on push/PR via GitHub Actions (`.github/workflows/test-backend.yml`).
+- Coverage is uploaded to Codecov (project target: **60%** for services).
+
+Badges (replace OWNER/REPO in the URLs with your GitHub repo):
+
+- CI workflow badge (replace OWNER/REPO):
+  ![CI workflow](https://github.com/OWNER/REPO/actions/workflows/test-backend.yml/badge.svg)
+
+- Coverage badge (replace OWNER/REPO):
+  ![Codecov](https://codecov.io/gh/OWNER/REPO/branch/main/graph/badge.svg)
+
+
 **Current Capabilities:**
 - ✅ Agent deployment and management
 - ✅ Secure C2 communications via mTLS
