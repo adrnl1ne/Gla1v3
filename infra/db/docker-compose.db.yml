@@ -1,0 +1,88 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gla1v3-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gla1v3
+      POSTGRES_USER: gla1v3_app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ChangeMeInProduction123!}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - ./migrations:/migrations:ro
+      - ./backups:/backups
+    networks:
+      - gla1v3-net
+    ports:
+      - "127.0.0.1:5432:5432"  # Only accessible from localhost for admin tools
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gla1v3_app -d gla1v3"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command:
+      - "postgres"
+      - "-c"
+      - "log_statement=all"
+      - "-c"
+      - "log_destination=stderr"
+      - "-c"
+      - "logging_collector=on"
+      - "-c"
+      - "max_connections=100"
+      - "-c"
+      - "shared_buffers=256MB"
+
+  # Automated backup service (runs daily at 3 AM)
+  postgres-backup:
+    image: postgres:16-alpine
+    container_name: gla1v3-postgres-backup
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: gla1v3
+      POSTGRES_USER: gla1v3_app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ChangeMeInProduction123!}
+      BACKUP_KEEP_DAYS: 7
+    volumes:
+      - ./backups:/backups
+    networks:
+      - gla1v3-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command: >
+      -c "
+      echo 'Backup service started. Will run daily at 3 AM.';
+      while true; do
+        current_hour=$$(date +%H);
+        if [ \"$$current_hour\" = \"03\" ]; then
+          echo \"[BACKUP] Starting automated backup at $$(date)\";
+          timestamp=$$(date +%Y%m%d_%H%M%S);
+          backup_file=\"/backups/gla1v3_backup_$$timestamp.sql\";
+          PGPASSWORD=$$POSTGRES_PASSWORD pg_dump -h $$POSTGRES_HOST -U $$POSTGRES_USER -d $$POSTGRES_DB > $$backup_file;
+          if [ $$? -eq 0 ]; then
+            gzip $$backup_file;
+            echo \"[BACKUP] Success: $$backup_file.gz\";
+            find /backups -name 'gla1v3_backup_*.sql.gz' -mtime +$$BACKUP_KEEP_DAYS -delete;
+            echo \"[BACKUP] Cleaned up backups older than $$BACKUP_KEEP_DAYS days\";
+          else
+            echo \"[BACKUP] Failed!\";
+          fi;
+          sleep 3600;
+        fi;
+        sleep 300;
+      done
+      "
+
+volumes:
+  postgres-data:
+    name: gla1v3-postgres-data
+
+networks:
+  gla1v3-net:
+    driver: bridge
+    name: infra_gla1v3-net

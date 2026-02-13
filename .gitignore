@@ -2,6 +2,12 @@ node_modules/
 certs/
 .env
 
+# Test coverage reports (do not commit)
+backend/coverage/
+
+# Frontend build output (do not commit)
+frontend/dist/
+
 # VM ISOs and large files
 vm-templates/images/*.iso
 *.iso

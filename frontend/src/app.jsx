@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Splash from './components/Splash';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
+import { TenantProvider } from './context/TenantContext';
 
 function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -11,14 +12,39 @@ function App() {
   const [token, setToken] = useState(null);
 
   useEffect(() => {
-    // Check for existing token in localStorage
+    // Check for existing token in localStorage and validate it
     const savedToken = localStorage.getItem('gla1v3_token');
     const savedUser = localStorage.getItem('gla1v3_user');
     
     if (savedToken && savedUser) {
-      setToken(savedToken);
-      setUser(JSON.parse(savedUser));
-      setIsAuthenticated(true);
+      // Validate token by making a test request
+      fetch('https://api.gla1v3.local/api/auth/verify', {
+        headers: {
+          'Authorization': `Bearer ${savedToken}`
+        }
+      })
+      .then(res => {
+        if (res.ok) {
+          setToken(savedToken);
+          setUser(JSON.parse(savedUser));
+          setIsAuthenticated(true);
+        } else {
+          // Token invalid, clear storage
+          console.log('Invalid token, clearing authentication');
+          localStorage.removeItem('gla1v3_token');
+          localStorage.removeItem('gla1v3_user');
+          setIsAuthenticated(false);
+        }
+      })
+      .catch(err => {
+        console.error('Token validation error:', err);
+        // Clear on error
+        localStorage.removeItem('gla1v3_token');
+        localStorage.removeItem('gla1v3_user');
+        setIsAuthenticated(false);
+      });
+    } else {
+      setIsAuthenticated(false);
     }
   }, []);
 
@@ -57,7 +83,11 @@ function App() {
     return <Login onLogin={handleLogin} />;
   }
 
-  return <Dashboard user={user} token={token} onLogout={handleLogout} />;
+  return (
+    <TenantProvider user={user} token={token}>
+      <Dashboard user={user} token={token} onLogout={handleLogout} />
+    </TenantProvider>
+  );
 }
 
 export default App;

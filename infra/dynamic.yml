@@ -5,12 +5,6 @@ tls:
         certFile: /etc/traefik/certs/server.crt
         keyFile: /etc/traefik/certs/server.key
   
-  certificates:
-    - certFile: /etc/traefik/certs/server.crt
-      keyFile: /etc/traefik/certs/server.key
-    - certFile: /etc/traefik/certs/c2.gla1v3.local.crt
-      keyFile: /etc/traefik/certs/c2.gla1v3.local.key
-  
   options:
     default:
       minVersion: VersionTLS12
@@ -29,3 +23,17 @@ http:
         info:
           subject:
             commonName: true
+    
+    # Rate limiting: 100 requests per minute per IP
+    rate-limit:
+      rateLimit:
+        average: 100
+        period: 1m
+        burst: 50
+    
+    # Request size limit: 10MB max
+    request-size-limit:
+      buffering:
+        maxRequestBodyBytes: 10485760  # 10MB in bytes
+        memRequestBodyBytes: 2097152   # 2MB buffer in memory
+        retryExpression: "IsNetworkError() && Attempts() < 3"

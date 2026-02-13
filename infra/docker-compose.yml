@@ -13,7 +13,7 @@ services:
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
       - ./dynamic.yml:/etc/traefik/dynamic.yml:ro
     environment:
-      - GLA1V3_DOMAIN=gla1v3.local
+      - GLA1V3_DOMAIN=${GLA1V3_DOMAIN}
     networks:
       - gla1v3-net
     depends_on:
@@ -24,41 +24,68 @@ services:
     container_name: backend
     restart: unless-stopped
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=${NODE_ENV:-production}
+      - ALLOW_INSECURE_DEFAULTS=${ALLOW_INSECURE_DEFAULTS:-false}
       - GLA1V3_DOMAIN=${GLA1V3_DOMAIN}
-      - AGENT_WHOAMI_TOKEN=3f7b9a2d8c1e4f5a6b7c8d9e0f1a2b3c
+      - AGENT_WHOAMI_TOKEN=${AGENT_WHOAMI_TOKEN}
       - OPENSEARCH_URL=${OPENSEARCH_URL}
       - OPENSEARCH_AUTH_METHOD=${OPENSEARCH_AUTH_METHOD}
-      - JWT_SECRET=CHANGEME_SECURE_SECRET_KEY_HERE
-      - ADMIN_PASSWORD=admin
-      - INTERNAL_TOKEN=CHANGEME_INTERNAL_TOKEN
+      - OPENSEARCH_USER=${OPENSEARCH_USER:-}
+      - OPENSEARCH_PASS=${OPENSEARCH_PASS:-}
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - INTERNAL_TOKEN=${INTERNAL_TOKEN}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=gla1v3
+      - DB_USER=gla1v3_api
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     volumes:
       - ../certs:/app/certs:ro
       - ../agents-go:/agents-go:ro
+      - agent-builds:/app/builds
       - wazuh-logs:/var/ossec/logs:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       - ca-service
+      - redis
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=gla1v3-net"
-      - "traefik.http.routers.backend-api.rule=Host(`api.gla1v3.local`)"
+      - "traefik.docker.network=infra_gla1v3-net"
+      - "traefik.http.routers.backend-api.rule=Host(`api.gla1v3.local`) && !PathPrefix(`/api/auth`)"
       - "traefik.http.routers.backend-api.entrypoints=websecure"
       - "traefik.http.routers.backend-api.tls=true"
+      - "traefik.http.routers.backend-api.tls.options=mtls@file"
+      - "traefik.http.routers.backend-api.middlewares=pass-client-cert@file,rate-limit@file,request-size-limit@file"
       - "traefik.http.routers.backend-api.service=backend-api-svc"
+      - "traefik.http.routers.backend-api-auth.rule=Host(`api.gla1v3.local`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.backend-api-auth.entrypoints=websecure"
+      - "traefik.http.routers.backend-api-auth.tls=true"
+      - "traefik.http.routers.backend-api-auth.middlewares=rate-limit@file,request-size-limit@file"
+      - "traefik.http.routers.backend-api-auth.service=backend-api-svc"
       - "traefik.http.services.backend-api-svc.loadbalancer.server.port=3000"
       - "traefik.http.routers.c2-beacon.rule=Host(`c2.gla1v3.local`) && PathPrefix(`/beacon`)"
       - "traefik.http.routers.c2-beacon.entrypoints=c2"
       - "traefik.http.routers.c2-beacon.tls=true"
       - "traefik.http.routers.c2-beacon.tls.options=mtls@file"
-      - "traefik.http.routers.c2-beacon.middlewares=pass-client-cert@file"
+      - "traefik.http.routers.c2-beacon.middlewares=pass-client-cert@file,rate-limit@file,request-size-limit@file"
       - "traefik.http.routers.c2-beacon.service=c2-svc"
       - "traefik.http.services.c2-svc.loadbalancer.server.port=3001"
+      - "traefik.http.routers.c2-root.rule=Host(`c2.gla1v3.local`) && PathPrefix(`/`)"
+      - "traefik.http.routers.c2-root.entrypoints=c2"
+      - "traefik.http.routers.c2-root.tls=true"
+      - "traefik.http.routers.c2-root.tls.options=mtls@file"
+      - "traefik.http.routers.c2-root.middlewares=pass-client-cert@file,rate-limit@file,request-size-limit@file"
+      - "traefik.http.routers.c2-root.service=c2-svc"
       - "traefik.http.routers.c2-health.rule=Host(`c2.gla1v3.local`) && Path(`/health`)"
       - "traefik.http.routers.c2-health.entrypoints=websecure"
       - "traefik.http.routers.c2-health.tls=true"
       - "traefik.http.routers.c2-health.service=backend-api-svc"
+      - "traefik.docker.network=infra_gla1v3-net"
     networks:
       - gla1v3-net
       - wazuh-net
@@ -72,6 +99,7 @@ services:
       - "traefik.http.routers.dashboard.rule=Host(`dashboard.gla1v3.local`) || Host(`gla1v3.local`)"
       - "traefik.http.routers.dashboard.entrypoints=websecure"
       - "traefik.http.routers.dashboard.tls=true"
+      - "traefik.http.routers.dashboard.middlewares=rate-limit@file,request-size-limit@file"
       - "traefik.http.services.dashboard.loadbalancer.server.port=5173"
     networks:
       - gla1v3-net
@@ -81,7 +109,7 @@ services:
     container_name: ca-service
     restart: unless-stopped
     environment:
-      - CERT_DIR=/certs
+      - CERT_DIR=${CERT_DIR:-/certs}
     volumes:
       - ca-certs:/certs
     labels:
@@ -93,8 +121,27 @@ services:
     networks:
       - gla1v3-net
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    networks:
+      - gla1v3-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
 volumes:
   ca-certs:
+    driver: local
+  agent-builds:
+    driver: local
+  redis-data:
     driver: local
   wazuh-logs:
     name: wazuh_wazuh-logs
@@ -102,6 +149,7 @@ volumes:
 
 networks:
   gla1v3-net:
-    driver: bridge
+    external: true
+    name: infra_gla1v3-net
   wazuh-net:
     driver: bridge

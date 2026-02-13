@@ -1,0 +1,10 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 60
+  require_ci_to_pass: yes
+  precision: 2
+  range: "1..100"
+
+comment: false

@@ -1,0 +1,10 @@
+node_modules
+.env
+*.log
+dist
+build
+.vscode
+.DS_Store
+certs
+npm-debug.log
+coverage
