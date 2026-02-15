@@ -72,6 +72,37 @@ You should see containers for:
 - `gla1v3-traefik` - Reverse proxy
 - `wazuh-*` - EDR components
 
+### Step 3.5: Verifying Your Setup
+
+After startup, perform these checks to ensure everything is working:
+
+#### Database Initialization
+On first startup, PostgreSQL runs initialization scripts:
+1. `01-schema.sql` - Creates tables (tenants, users, agents, tasks, results, audit_log)
+2. `02-rls-policies.sql` - Enables Row-Level Security for multi-tenant isolation
+3. `03-functions.sql` - Helper functions
+4. `04-create-api-user.sh` - Creates `gla1v3_api` user (non-privileged, RLS enforced)
+
+#### Database Users
+| User | Privileges | Purpose |
+|------|-----------|---------|
+| `gla1v3_app` | SUPERUSER | Admin operations, manual queries |
+| `gla1v3_api` | Normal (RLS enforced) | Backend runtime (used by application) |
+
+#### Verification Commands
+```bash
+# Test RLS (should only see assigned tenant data)
+docker exec gla1v3-postgres psql -U gla1v3_api -d gla1v3 -c "
+  SET app.current_user_id = 'user-uuid';
+  SELECT COUNT(*) FROM agents;
+"
+
+# Check backend connection
+docker logs backend --tail 20
+```
+
+Expected: `✅ Database connected successfully`
+
 ### Step 4: Access the Dashboard
 
 Open your browser and navigate to:
@@ -213,6 +244,43 @@ docker compose up -d
 - URL: `http://localhost:8443`
 - Username: `admin`
 - Password: `SecretPassword`
+
+#### Prerequisites for Wazuh
+- **Additional 4GB RAM** (total 12GB+ recommended)
+- **10GB disk space** for alert indexing
+- Main infrastructure must be running first
+
+#### Quick Start Commands
+**Start Wazuh + OpenSearch:**
+```powershell
+cd infra/wazuh
+docker compose up -d
+```
+
+**Verify services:**
+```powershell
+docker compose ps
+```
+Expected: `wazuh`, `opensearch`, `wazuh-indexer` containers running.
+
+#### Integrating with Gla1v3
+1. Start main C2 infra first: `cd infra && docker compose up -d`
+2. Wazuh will be available to the backend via configured API URL
+3. Use the dashboard `Alert Table` to view correlated EDR detections
+
+#### Wazuh Access
+- **Wazuh API**: https://localhost:55001 (user: `wazuh` / pass: `wazuh`)
+- **Dashboard**: https://localhost:8443
+- **OpenSearch**: http://localhost:9200
+
+#### Wazuh Troubleshooting
+- **Agents not connecting**: Check Wazuh manager logs: `docker compose logs wazuh --tail 50`
+- **No alerts**: Ensure Wazuh agent can reach manager (port 1514) and check OpenSearch indices
+
+#### Wazuh Files & Locations
+- Compose file: `infra/wazuh/docker-compose.yml`
+- Rules: `infra/wazuh/wazuh-rules/`
+- Indexer helper: `infra/wazuh/wazuh-config/wazuh-indexer.sh`
 
 ### Wazuh Requirements
 
