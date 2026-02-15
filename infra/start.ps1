@@ -44,10 +44,9 @@ BACKUP_KEEP_DAYS=7
 "@ | Out-File -FilePath "$PSScriptRoot\db\.env" -Encoding ASCII -NoNewline
 }
 
-# Ensure docker-compose picks up environment: copy root .env into infra/.env
-$infraEnvPath = "$PSScriptRoot\.env"
-Copy-Item -Force $rootEnvPath -Destination $infraEnvPath
-Write-Host "[0/6] Copied repo root .env -> infra/.env (so docker compose has env vars)" -ForegroundColor Cyan
+# Ensure docker-compose picks up environment: use --env-file to read from root .env
+# (Removed copy to avoid duplicate .env file)
+Write-Host "[0/6] Using repo root .env for docker compose" -ForegroundColor Cyan
 
 # Sync DB_PASSWORD to root .env for backend
 $rootEnvPath = "$PSScriptRoot\..\.env"
@@ -94,7 +93,7 @@ if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
 Write-Host ""
 Write-Host "[4/6] Starting Docker services..." -ForegroundColor Yellow
 Set-Location $PSScriptRoot
-docker compose up -d --build
+docker compose --env-file ../.env up -d --build
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Docker startup failed!" -ForegroundColor Red

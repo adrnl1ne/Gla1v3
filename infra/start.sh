@@ -26,10 +26,9 @@ BACKUP_KEEP_DAYS=7
 EOF
 fi
 
-# Ensure docker-compose picks up environment: copy root .env into infra/.env
-# Docker Compose reads .env from the working directory (infra/), so we create it here.
-cp "$ROOT_ENV" "$(dirname \"$0\")/.env"
-echo "[0/6] Copied repo root .env -> infra/.env (so docker compose has env vars)"
+# Ensure docker-compose picks up environment: use --env-file to read from root .env
+# (Removed copy to avoid duplicate .env file)
+echo "[0/6] Using repo root .env for docker compose"
 
 # Sync DB_PASSWORD to root .env for backend
 ROOT_ENV="$(dirname "$0")/../.env"
@@ -69,7 +68,7 @@ bash "$(dirname "$0")/scripts/generate_session_certs.sh"
 echo ""
 echo "[4/6] Starting Docker services..."
 cd "$(dirname "$0")"
-docker compose up -d --build
+docker compose --env-file ../.env up -d --build
 
 if [ $? -ne 0 ]; then
     echo "✗ Docker startup failed!"
