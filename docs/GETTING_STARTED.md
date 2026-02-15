@@ -185,13 +185,13 @@ The platform includes **Wazuh EDR** for advanced threat detection and monitoring
 
 ### Starting Wazuh EDR
 
-The start scripts automatically attempt to start Wazuh after the main infrastructure. If you see:
+The start scripts will automatically attempt to start Wazuh **only if** the `infra/wazuh` folder is present. If Wazuh is not configured or fails to start you may see:
 
 ```
 ⚠️  Wazuh EDR failed to start (platform will work without EDR)
 ```
 
-This is **not a critical error**. The C2 platform is fully functional without EDR.
+This is **not a critical error** — the core C2 services (DB, backend, Redis, Traefik) will start independently because Wazuh is optional and no longer required by the top‑level compose configuration.
 
 ### Manual Wazuh Startup
 

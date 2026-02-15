@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
-OUT_DIR="$(cd "$(dirname "$0")" && cd .. && pwd)/certs"
+# Write generated certs to repo-root `certs/` (standardised)
+OUT_DIR="$(cd "$(dirname "$0")" && cd ../.. && pwd)/certs"
 mkdir -p "$OUT_DIR"
 cd "$OUT_DIR"
 

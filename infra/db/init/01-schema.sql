@@ -129,6 +129,7 @@ CREATE INDEX idx_agent_blacklist_tenant ON agent_blacklist(tenant_id);
 CREATE INDEX idx_agent_blacklist_expires ON agent_blacklist(expires_at) WHERE expires_at IS NOT NULL;
 CREATE INDEX idx_agent_blacklist_revoked ON agent_blacklist(revoked);
 
+COMMENT ON COLUMN agent_blacklist.agent_id IS 'Agent identifier (references agents.id)';
 COMMENT ON TABLE agent_blacklist IS 'Blacklisted agents that are denied access to the C2 server';
 
 -- ============================================================================

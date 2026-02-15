@@ -57,7 +57,7 @@ function validateSecrets() {
     errors.forEach(err => console.error(err));
     
     console.error('\n📋 HOW TO FIX:');
-    console.error('  1. Check your .env file in infra/ directory');
+    console.error('  1. Check your root .env file (repo root)');
     console.error('  2. Ensure all secrets are set with strong values');
     console.error('  3. Restart the application\n');
     console.error('For development only: Set ALLOW_INSECURE_DEFAULTS=true (NOT for production!)\n');

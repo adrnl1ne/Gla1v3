@@ -105,7 +105,7 @@ docker compose logs wazuh --tail 50
 ### OpenSearch connection issues
 If backend can't reach OpenSearch, check:
 - Network: backend and opensearch must be on same `wazuh-net` or accessible via DNS
-- Credentials: Update OPENSEARCH_URL and auth method in `infra/.env`
+- Credentials: Update OPENSEARCH_URL and auth method in `./.env` (repo root)
 - Port: OpenSearch runs on 9200 (internal to containers)
 
 ## Files

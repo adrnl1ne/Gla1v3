@@ -1,0 +1,28 @@
+#!/bin/sh
+# Repository-local pre-push hook (enable by setting git config core.hooksPath .githooks)
+# Scans commits to be pushed for sensitive files and aborts push if found.
+
+REMOTE_NAME="$1"
+REMOTE_URL="$2"
+
+while read local_ref local_sha remote_ref remote_sha; do
+  # Determine range to inspect
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    RANGE="$local_sha"
+  else
+    RANGE="$remote_sha..$local_sha"
+  fi
+
+  if [ -z "$RANGE" ]; then
+    continue
+  fi
+
+  FILES=$(git diff --name-only $RANGE)
+  echo "$FILES" | grep -E "(^|/)\.env$|\.env$|\.key$|\.pem$" >/dev/null 2>&1 && {
+    echo "\nABORT: push contains sensitive files (\.env/.key/.pem). Remove them from the commits before pushing." >&2
+    exit 1
+  }
+
+done
+
+exit 0

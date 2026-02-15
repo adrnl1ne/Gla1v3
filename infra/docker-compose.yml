@@ -47,7 +47,6 @@ services:
       - ../certs:/app/certs:ro
       - ../agents-go:/agents-go:ro
       - agent-builds:/app/builds
-      - wazuh-logs:/var/ossec/logs:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -143,9 +142,7 @@ volumes:
     driver: local
   redis-data:
     driver: local
-  wazuh-logs:
-    name: wazuh_wazuh-logs
-    external: true
+
 
 networks:
   gla1v3-net:

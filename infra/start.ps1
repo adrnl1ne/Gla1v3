@@ -2,14 +2,15 @@
 Write-Host "=== GLA1V3 Infrastructure Startup ===" -ForegroundColor Cyan
 Write-Host ""
 
-# Check if .env file exists and has required variables
-if (-not (Test-Path .env)) {
-    Write-Host "⚠️  No .env file found. Please copy .env.example to .env and configure." -ForegroundColor Yellow
+# Check if root .env file exists and has required variables
+$rootEnvPath = "$PSScriptRoot\..\.env"
+if (-not (Test-Path $rootEnvPath)) {
+    Write-Host "⚠️  No root .env file found at $rootEnvPath. Please copy .env.example to repo root and configure." -ForegroundColor Yellow
     exit 1
 }
 
 # Check for required environment variables
-$envContent = Get-Content .env -Raw
+$envContent = Get-Content $rootEnvPath -Raw
 $requiredVars = @('JWT_SECRET', 'ADMIN_PASSWORD', 'DB_PASSWORD', 'REDIS_PASSWORD')
 $missing = @()
 
@@ -42,6 +43,11 @@ DB_PASSWORD=$dbPassword
 BACKUP_KEEP_DAYS=7
 "@ | Out-File -FilePath "$PSScriptRoot\db\.env" -Encoding ASCII -NoNewline
 }
+
+# Ensure docker-compose picks up environment: copy root .env into infra/.env
+$infraEnvPath = "$PSScriptRoot\.env"
+Copy-Item -Force $rootEnvPath -Destination $infraEnvPath
+Write-Host "[0/6] Copied repo root .env -> infra/.env (so docker compose has env vars)" -ForegroundColor Cyan
 
 # Sync DB_PASSWORD to root .env for backend
 $rootEnvPath = "$PSScriptRoot\..\.env"
@@ -97,18 +103,18 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "[5/6] Starting Wazuh EDR (optional)..." -ForegroundColor Yellow
-if (Test-Path "$PSScriptRoot\wazuh\docker-compose.yml") {
+if (Test-Path "$PSScriptRoot\wazuh") {
+    Write-Host "→ Wazuh folder detected — starting optional EDR stack" -ForegroundColor Cyan
     Set-Location "$PSScriptRoot\wazuh"
-    docker compose up -d
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "✓ Wazuh EDR started successfully" -ForegroundColor Green
-    } else {
+    & docker compose up -d
+    if ($LASTEXITCODE -ne 0) {
         Write-Host "⚠️  Wazuh EDR failed to start (platform will work without EDR)" -ForegroundColor Yellow
+    } else {
+        Write-Host "✓ Wazuh EDR started (if configured)" -ForegroundColor Green
     }
     Set-Location $PSScriptRoot
 } else {
-    Write-Host "⚠️  Wazuh configuration not found, skipping..." -ForegroundColor Yellow
+    Write-Host "→ No 'infra/wazuh' folder found; skipping optional EDR start" -ForegroundColor Yellow
 }
 
 Write-Host ""

@@ -1,0 +1,20 @@
+#!/bin/sh
+# Repository-local pre-commit hook (enable by setting git config core.hooksPath .githooks)
+# Blocks accidental commits of .env and private keys
+
+STAGED_FILES=$(git diff --cached --name-only --no-renames)
+
+# Block .env files
+echo "$STAGED_FILES" | grep -E "(^|/)\.env$|\.env$" >/dev/null 2>&1 && {
+  echo "\nERROR: Committing .env files is forbidden. Remove them from the index and re-commit." >&2
+  echo "Run: git restore --staged <file>   (or)   git rm --cached <file>" >&2
+  exit 1
+}
+
+# Block private key files by extension
+echo "$STAGED_FILES" | grep -E "\.key$|\.pem$" >/dev/null 2>&1 && {
+  echo "\nERROR: Committing private keys (.key/.pem) is forbidden. Remove them from the index." >&2
+  exit 1
+}
+
+exit 0

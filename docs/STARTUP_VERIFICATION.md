@@ -12,7 +12,7 @@ cd infra
 ## What It Does
 
 1. **Validates** `.env` configuration
-2. **Syncs** database password between `infra/.env` and `infra/db/.env`
+2. **Syncs** database password between `./.env` (repo root) and `infra/db/.env`
 3. **Starts** PostgreSQL if not running
 4. **Generates** mTLS certificates
 5. **Launches** all services via Docker Compose
@@ -50,8 +50,10 @@ PostgreSQL runs initialization scripts from `infra/db/init/`:
 - **Docs:** https://doc.traefik.io/traefik/
 
 ### OpenSearch (Wazuh Stack)
-- **Purpose:** EDR alert storage and querying
+- **Purpose:** EDR alert storage and querying (optional)
 - **Docs:** https://wazuh.com/platform/
+
+Note: Wazuh start is optional — the `start` script will attempt to start the `infra/wazuh` stack only if that folder exists. The core platform does not require Wazuh.
 
 ## Verification
 

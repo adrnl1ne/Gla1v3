@@ -1,6 +1,9 @@
 node_modules/
 certs/
 .env
+infra/.env
+*.key
+*.pem
 
 # Test coverage reports (do not commit)
 backend/coverage/

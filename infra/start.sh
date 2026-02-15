@@ -5,15 +5,16 @@ echo ""
 echo "=== GLA1V3 Infrastructure Startup ==="
 echo ""
 
-# Check if .env file exists
-if [ ! -f .env ]; then
-    echo "⚠️  No .env file found. Please copy .env.example to .env and configure."
+# Check if root .env file exists (single source-of-truth in repo root)
+ROOT_ENV="$(dirname "$0")/../.env"
+if [ ! -f "$ROOT_ENV" ]; then
+    echo "⚠️  No root .env file found at $ROOT_ENV. Please copy .env.example to repo root and configure."
     exit 1
 fi
 
 # Sync DB_PASSWORD to database .env
 echo "[1/4] Synchronizing database configuration..."
-DB_PASSWORD=$(grep "^DB_PASSWORD=" .env | cut -d'=' -f2)
+DB_PASSWORD=$(grep "^DB_PASSWORD=" "$ROOT_ENV" | cut -d'=' -f2)
 if [ -f "$(dirname "$0")/db/.env" ]; then
     sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" "$(dirname "$0")/db/.env"
 else
@@ -24,6 +25,11 @@ DB_PASSWORD=$DB_PASSWORD
 BACKUP_KEEP_DAYS=7
 EOF
 fi
+
+# Ensure docker-compose picks up environment: copy root .env into infra/.env
+# Docker Compose reads .env from the working directory (infra/), so we create it here.
+cp "$ROOT_ENV" "$(dirname \"$0\")/.env"
+echo "[0/6] Copied repo root .env -> infra/.env (so docker compose has env vars)"
 
 # Sync DB_PASSWORD to root .env for backend
 ROOT_ENV="$(dirname "$0")/../.env"
@@ -72,18 +78,14 @@ fi
 
 echo ""
 echo "[5/6] Starting Wazuh EDR (optional)..."
-if [ -f "$(dirname "$0")/wazuh/docker-compose.yml" ]; then
+if [ -d "$(dirname "$0")/wazuh" ]; then
+    echo "→ Wazuh folder detected — starting optional EDR stack"
     cd "$(dirname "$0")/wazuh"
-    docker compose up -d
-    
-    if [ $? -eq 0 ]; then
-        echo "✓ Wazuh EDR started successfully"
-    else
-        echo "⚠️  Wazuh EDR failed to start (platform will work without EDR)"
-    fi
+    docker compose up -d || echo "⚠️  Wazuh EDR failed to start (platform will work without EDR)"
+    echo "✓ Wazuh EDR start attempted"
     cd "$(dirname "$0")"
 else
-    echo "⚠️  Wazuh configuration not found, skipping..."
+    echo "→ No 'infra/wazuh' folder found; skipping optional EDR start"
 fi
 
 echo ""
