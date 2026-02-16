@@ -26,7 +26,7 @@ Write-Host "Creating backup before reset..." -ForegroundColor Cyan
 
 Write-Host ""
 Write-Host "Stopping database..." -ForegroundColor Yellow
-docker-compose -f docker-compose.db.yml down
+docker-compose -f ../../db/docker-compose.db.yml down
 
 Write-Host "Removing database volume..." -ForegroundColor Yellow
 docker volume rm gla1v3-postgres-data 2>$null

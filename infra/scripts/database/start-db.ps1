@@ -33,7 +33,7 @@ BACKUP_KEEP_DAYS=7
 
 # Start database
 Write-Host "Starting PostgreSQL database..." -ForegroundColor White
-docker-compose -f docker-compose.db.yml up -d
+docker-compose -f ../../db/docker-compose.db.yml up -d
 
 Write-Host ""
 Write-Host "Waiting for database to be healthy..." -ForegroundColor White
@@ -56,7 +56,7 @@ while ($elapsed -lt $timeout) {
 if (-not $ready) {
     Write-Host ""
     Write-Host "❌ Database failed to start within $timeout seconds" -ForegroundColor Red
-    docker-compose -f docker-compose.db.yml logs postgres
+    docker-compose -f ../../db/docker-compose.db.yml logs postgres
     exit 1
 }
 
@@ -127,7 +127,7 @@ Write-Host "✅ Schema updates applied" -ForegroundColor Green
 
 # Apply migrations
 Write-Host "Applying database migrations..." -ForegroundColor White
-Get-ChildItem -Path ".\migrations\*.sql" | Sort-Object Name | ForEach-Object {
+Get-ChildItem -Path "..\..\db\migrations\*.sql" | Sort-Object Name | ForEach-Object {
     Write-Host "  Applying migration: $($_.Name)" -ForegroundColor Gray
     $ErrorActionPreference = 'Continue'
     docker exec gla1v3-postgres psql -U gla1v3_app -d gla1v3 -f "/migrations/$($_.Name)" 2>$null | Out-Null

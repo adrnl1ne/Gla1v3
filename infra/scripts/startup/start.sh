@@ -6,7 +6,7 @@ echo "=== GLA1V3 Infrastructure Startup ==="
 echo ""
 
 # Check if root .env file exists (single source-of-truth in repo root)
-ROOT_ENV="$(dirname "$0")/../.env"
+ROOT_ENV="$(dirname "$0")/../../../.env"
 if [ ! -f "$ROOT_ENV" ]; then
     echo "⚠️  No root .env file found at $ROOT_ENV. Please copy .env.example to repo root and configure."
     exit 1
@@ -15,10 +15,10 @@ fi
 # Sync DB_PASSWORD to database .env
 echo "[1/4] Synchronizing database configuration..."
 DB_PASSWORD=$(grep "^DB_PASSWORD=" "$ROOT_ENV" | cut -d'=' -f2)
-if [ -f "$(dirname "$0")/db/.env" ]; then
-    sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" "$(dirname "$0")/db/.env"
+if [ -f "$(dirname "$0")/../database/.env" ]; then
+    sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" "$(dirname "$0")/../database/.env"
 else
-    cat > "$(dirname "$0")/db/.env" <<EOF
+    cat > "$(dirname "$0")/../database/.env" <<EOF
 # PostgreSQL Configuration
 # Generate a secure password by running: openssl rand -base64 32
 DB_PASSWORD=$DB_PASSWORD
@@ -31,7 +31,7 @@ fi
 echo "[0/6] Using repo root .env for docker compose"
 
 # Sync DB_PASSWORD to root .env for backend
-ROOT_ENV="$(dirname "$0")/../.env"
+ROOT_ENV="$(dirname "$0")/../../../.env"
 if [ -f "$ROOT_ENV" ]; then
     sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" "$ROOT_ENV"
 else
@@ -63,12 +63,12 @@ if ! docker ps | grep -q gla1v3-postgres; then
 fi
 
 echo "[3/4] Generating session certificates..."
-bash "$(dirname "$0")/scripts/generate_session_certs.sh"
+bash "$(dirname "$0")/../certgen/generate_session_certs.sh"
 
 echo ""
 echo "[4/6] Starting Docker services..."
-cd "$(dirname "$0")"
-docker compose --env-file ../.env up -d --build
+cd "$(dirname "$0")/.."
+docker compose --env-file ../../.env up -d --build
 
 if [ $? -ne 0 ]; then
     echo "✗ Docker startup failed!"
@@ -77,9 +77,9 @@ fi
 
 echo ""
 echo "[5/6] Starting Wazuh EDR (optional)..."
-if [ -d "$(dirname "$0")/wazuh" ]; then
+if [ -d "$(dirname "$0")/../../wazuh" ]; then
     echo "→ Wazuh folder detected — starting optional EDR stack"
-    cd "$(dirname "$0")/wazuh"
+    cd "$(dirname "$0")/../../wazuh"
     docker compose up -d || echo "⚠️  Wazuh EDR failed to start (platform will work without EDR)"
     echo "✓ Wazuh EDR start attempted"
     cd "$(dirname "$0")"

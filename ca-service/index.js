@@ -51,6 +51,20 @@ async function ensureCA() {
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'healthy' }));
 
+// Serve CA certificate for client setup
+app.get('/ca.crt', async (req, res) => {
+  try {
+    const caCertPath = path.join(CERT_DIR, 'ca-cert.pem');
+    const certData = await fs.readFile(caCertPath);
+    res.setHeader('Content-Type', 'application/x-x509-ca-cert');
+    res.setHeader('Content-Disposition', 'attachment; filename="gla1v3-ca.crt"');
+    res.send(certData);
+  } catch (err) {
+    console.error('Failed to serve CA certificate:', err);
+    res.status(500).json({ error: 'Failed to retrieve CA certificate' });
+  }
+});
+
 // Generate session-based certificate
 app.post('/generate-cert', async (req, res) => {
   const { userId, sessionId, role, ttl } = req.body;

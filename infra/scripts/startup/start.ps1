@@ -3,7 +3,7 @@ Write-Host "=== GLA1V3 Infrastructure Startup ===" -ForegroundColor Cyan
 Write-Host ""
 
 # Check if root .env file exists and has required variables
-$rootEnvPath = "$PSScriptRoot\..\.env"
+$rootEnvPath = "$PSScriptRoot\..\..\..\.env"
 if (-not (Test-Path $rootEnvPath)) {
     Write-Host "⚠️  No root .env file found at $rootEnvPath. Please copy .env.example to repo root and configure." -ForegroundColor Yellow
     exit 1
@@ -31,17 +31,17 @@ if ($missing.Count -gt 0) {
 # Sync DB_PASSWORD to database .env
 Write-Host "[1/4] Synchronizing database configuration..." -ForegroundColor Yellow
 $dbPassword = ($envContent | Select-String "DB_PASSWORD=(.+)" | ForEach-Object { $_.Matches.Groups[1].Value })
-if (Test-Path "$PSScriptRoot\db\.env") {
-    $dbEnvContent = Get-Content "$PSScriptRoot\db\.env" -Raw
+if (Test-Path "$PSScriptRoot\..\database\.env") {
+    $dbEnvContent = Get-Content "$PSScriptRoot\..\database\.env" -Raw
     $dbEnvContent = $dbEnvContent -replace "DB_PASSWORD=.+", "DB_PASSWORD=$dbPassword"
-    $dbEnvContent | Out-File -FilePath "$PSScriptRoot\db\.env" -Encoding ASCII -NoNewline
+    $dbEnvContent | Out-File -FilePath "$PSScriptRoot\..\database\.env" -Encoding ASCII -NoNewline
 } else {
     @"
 # PostgreSQL Configuration
 # Generate a secure password by running: openssl rand -base64 32
 DB_PASSWORD=$dbPassword
 BACKUP_KEEP_DAYS=7
-"@ | Out-File -FilePath "$PSScriptRoot\db\.env" -Encoding ASCII -NoNewline
+"@ | Out-File -FilePath "$PSScriptRoot\..\database\.env" -Encoding ASCII -NoNewline
 }
 
 # Ensure docker-compose picks up environment: use --env-file to read from root .env
@@ -49,7 +49,7 @@ BACKUP_KEEP_DAYS=7
 Write-Host "[0/6] Using repo root .env for docker compose" -ForegroundColor Cyan
 
 # Sync DB_PASSWORD to root .env for backend
-$rootEnvPath = "$PSScriptRoot\..\.env"
+$rootEnvPath = "$PSScriptRoot\..\..\..\.env"
 if (Test-Path $rootEnvPath) {
     $rootEnvContent = Get-Content $rootEnvPath -Raw
     $rootEnvContent = $rootEnvContent -replace "DB_PASSWORD=.+", "DB_PASSWORD=$dbPassword"
@@ -75,15 +75,15 @@ NODE_ENV=development
 
 Write-Host ""
 Write-Host "[2/4] Starting PostgreSQL database..." -ForegroundColor Yellow
-if (Test-Path "$PSScriptRoot\db") {
-    Set-Location "$PSScriptRoot\db"
+if (Test-Path "$PSScriptRoot\..\database") {
+    Set-Location "$PSScriptRoot\..\database"
     & .\start-db.ps1
     Set-Location $PSScriptRoot
     Write-Host ""
 }
 
 Write-Host "[3/4] Generating session certificates..." -ForegroundColor Yellow
-& "$PSScriptRoot\scripts\generate_session_certs.ps1"
+& "$PSScriptRoot\..\certgen\generate_session_certs.ps1"
 
 if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
     Write-Host "Certificate generation failed!" -ForegroundColor Red
@@ -92,8 +92,8 @@ if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
 
 Write-Host ""
 Write-Host "[4/6] Starting Docker services..." -ForegroundColor Yellow
-Set-Location $PSScriptRoot
-docker compose --env-file ../.env up -d --build
+Set-Location "$PSScriptRoot\.."
+docker compose --env-file ../../.env up -d --build
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Docker startup failed!" -ForegroundColor Red
@@ -102,9 +102,9 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "[5/6] Starting Wazuh EDR (optional)..." -ForegroundColor Yellow
-if (Test-Path "$PSScriptRoot\wazuh") {
+if (Test-Path "$PSScriptRoot\..\..\wazuh") {
     Write-Host "→ Wazuh folder detected — starting optional EDR stack" -ForegroundColor Cyan
-    Set-Location "$PSScriptRoot\wazuh"
+    Set-Location "$PSScriptRoot\..\..\wazuh"
     & docker compose up -d
     if ($LASTEXITCODE -ne 0) {
         Write-Host "⚠️  Wazuh EDR failed to start (platform will work without EDR)" -ForegroundColor Yellow
