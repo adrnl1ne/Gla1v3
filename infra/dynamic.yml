@@ -37,3 +37,96 @@ http:
         maxRequestBodyBytes: 10485760  # 10MB in bytes
         memRequestBodyBytes: 2097152   # 2MB buffer in memory
         retryExpression: "IsNetworkError() && Attempts() < 3"
+
+  routers:
+    # Backend API Router
+    backend-api:
+      rule: "Host(`api.gla1v3.local`)"
+      entrypoints:
+        - websecure
+      tls: true
+      middlewares:
+        - rate-limit@file
+        - request-size-limit@file
+      service: backend-api-svc
+
+    # C2 Beacon Router
+    c2-beacon:
+      rule: "Host(`c2.gla1v3.local`) && PathPrefix(`/beacon`)"
+      entrypoints:
+        - c2
+      tls:
+        options: mtls
+      middlewares:
+        - pass-client-cert@file
+        - rate-limit@file
+        - request-size-limit@file
+      service: c2-svc
+
+    # C2 Root Router
+    c2-root:
+      rule: "Host(`c2.gla1v3.local`) && PathPrefix(`/`)"
+      entrypoints:
+        - c2
+      tls:
+        options: mtls
+      middlewares:
+        - pass-client-cert@file
+        - rate-limit@file
+        - request-size-limit@file
+      service: c2-svc
+
+    # C2 Health Router
+    c2-health:
+      rule: "Host(`c2.gla1v3.local`) && Path(`/health`)"
+      entrypoints:
+        - websecure
+      tls: true
+      service: backend-api-svc
+
+    # Dashboard Router
+    dashboard:
+      rule: "Host(`dashboard.gla1v3.local`) || Host(`gla1v3.local`)"
+      entrypoints:
+        - websecure
+      tls: true
+      middlewares:
+        - rate-limit@file
+        - request-size-limit@file
+      service: dashboard
+
+    # CA Service Router
+    ca-service:
+      rule: "Host(`ca.gla1v3.local`)"
+      entrypoints:
+        - websecure
+      tls: true
+      middlewares:
+        - rate-limit@file
+        - request-size-limit@file
+      service: ca-service
+
+  services:
+    # Backend API Service
+    backend-api-svc:
+      loadBalancer:
+        servers:
+          - url: "http://backend:3000"
+
+    # C2 Service
+    c2-svc:
+      loadBalancer:
+        servers:
+          - url: "http://backend:3001"
+
+    # Dashboard Service
+    dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://frontend:5173"
+
+    # CA Service
+    ca-service:
+      loadBalancer:
+        servers:
+          - url: "http://ca-service:3003"

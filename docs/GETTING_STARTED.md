@@ -17,7 +17,7 @@ Before you begin, ensure you have:
 ### System Configuration
 
 #### Windows Users
-Enable PowerShell script execution and install OpenSSL:
+Enable PowerShell script execution, install OpenSSL, and configure Docker Desktop:
 
 1. **Enable Script Execution** (run as Administrator):
    ```powershell
@@ -29,6 +29,12 @@ Enable PowerShell script execution and install OpenSSL:
    - Install the "Win64 OpenSSL v3.x.x" MSI
    - Choose "The OpenSSL binaries (/bin) directory" option during installation
    - Add OpenSSL to PATH: `C:\Program Files\OpenSSL-Win64\bin`
+
+3. **Enable WSL Integration in Docker Desktop**:
+   - Open Docker Desktop
+   - Go to Settings → Resources → WSL Integration
+   - Enable integration for your WSL distribution (e.g., Ubuntu)
+   - Click "Apply & Restart"
 
 #### Linux/Mac Users
 Ensure your user is in the docker group:
@@ -55,9 +61,9 @@ cd infra
 
 Run the startup script:
 
-**Windows:** `.\scripts\startup\start.ps1`
+**Windows:** Open WSL terminal, navigate to project directory, then run: `./infra/scripts/startup/start.sh`
 
-**Linux/Mac:** `chmod +x scripts/startup/start.sh && ./scripts/startup/start.sh`
+**Linux/Mac:** `cd infra && chmod +x scripts/startup/start.sh && ./scripts/startup/start.sh`
 
 The startup script will:
 1. Generate secure certificates for mTLS
@@ -193,6 +199,29 @@ After installation:
 1. **Restart your browser**
 2. Navigate to `https://dashboard.gla1v3.local`
 3. You should see a secure connection (lock icon) without warnings
+
+### Step 4.5: Configure Local DNS Resolution
+
+**Important**: Gla1v3 uses local domain names that need to be resolved to `127.0.0.1`. Add these entries to your hosts file:
+
+#### Windows
+1. Open Notepad as Administrator
+2. Open `C:\Windows\System32\drivers\etc\hosts`
+3. Add these lines at the end:
+   ```
+   127.0.0.1 dashboard.gla1v3.local
+   127.0.0.1 api.gla1v3.local
+   127.0.0.1 c2.gla1v3.local
+   127.0.0.1 ca.gla1v3.local
+   127.0.0.1 gla1v3.local
+   ```
+4. Save the file
+
+#### Linux/macOS
+Add to `/etc/hosts`:
+```
+127.0.0.1 dashboard.gla1v3.local api.gla1v3.local c2.gla1v3.local ca.gla1v3.local gla1v3.local
+```
 
 ### Step 5: Access the Dashboard
 
