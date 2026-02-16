@@ -1,8 +1,7 @@
 #Requires -Version 5.1
 
 $ErrorActionPreference = "Stop"
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $ScriptDir
+Set-Location (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  Gla1v3 Database Startup" -ForegroundColor Cyan
@@ -18,7 +17,7 @@ if (-not (Test-Path .env)) {
     # Generate secure password
     $bytes = New-Object byte[] 32
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-    $DB_PASSWORD = [Convert]::ToBase64String($bytes) -replace '[+/=]', '' | Select-Object -First 32
+    $DB_PASSWORD = ([Convert]::ToBase64String($bytes) -replace '[+/=]', '').Substring(0, 32)
     
     @"
 # PostgreSQL Configuration
@@ -42,7 +41,7 @@ $elapsed = 0
 $ready = $false
 
 while ($elapsed -lt $timeout) {
-    $result = docker exec gla1v3-postgres pg_isready -U gla1v3_app -d gla1v3 2>$null
+    docker exec gla1v3-postgres pg_isready -U gla1v3_app -d gla1v3 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✅ Database is ready!" -ForegroundColor Green
         $ready = $true
