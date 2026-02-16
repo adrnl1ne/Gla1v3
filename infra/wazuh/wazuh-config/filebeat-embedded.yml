@@ -1,0 +1,13 @@
+# Embedded minimal Filebeat config to prevent the manager's builtin Filebeat from trying to index
+filebeat.inputs: []
+filebeat.config.modules:
+  path: ${path.config}/modules.d/*.yml
+  reload.enabled: false
+output.file:
+  path: "/var/log"
+  filename: "filebeat-embedded"
+logging.level: warning
+logging.to_files: true
+logging.files:
+  keepfiles: 3
+  rotateeverybytes: 10485760
