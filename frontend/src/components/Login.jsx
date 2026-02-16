@@ -197,9 +197,6 @@ export default function Login({ onLogin }) {
           <div style={{ color: '#8b949e', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
               🔒 Secured with JWT + 2FA + mTLS
             </div>
-            <div style={{ color: '#6b6f74', fontSize: '0.75rem' }}>
-              Default credentials: admin / admin
-            </div>
           </div>
         </div>
       </div>
