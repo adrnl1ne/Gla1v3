@@ -197,7 +197,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 COMMENT ON FUNCTION get_user_tenants IS 'Get all tenants accessible by a user. Admins see all, operators see assigned.';
 
 -- ============================================================================
--- RLS POLICIES FOR AGENT_BLACKLIST TABLE (Run after 06-blacklist-table.sql)
+-- RLS POLICIES FOR AGENT_BLACKLIST TABLE (applies when `agent_blacklist` exists in the schema — canonical definition in `01-schema.sql`)
 -- ============================================================================
 
 DO $$

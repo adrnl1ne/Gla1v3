@@ -47,7 +47,6 @@ services:
       - ../certs:/app/certs:ro
       - ../agents-go:/agents-go:ro
       - agent-builds:/app/builds
-      - wazuh-logs:/var/ossec/logs:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -56,29 +55,23 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=infra_gla1v3-net"
-      - "traefik.http.routers.backend-api.rule=Host(`api.gla1v3.local`) && !PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.backend-api.rule=Host(`api.gla1v3.local`)"
       - "traefik.http.routers.backend-api.entrypoints=websecure"
       - "traefik.http.routers.backend-api.tls=true"
-      - "traefik.http.routers.backend-api.tls.options=mtls@file"
-      - "traefik.http.routers.backend-api.middlewares=pass-client-cert@file,rate-limit@file,request-size-limit@file"
+      - "traefik.http.routers.backend-api.middlewares=rate-limit@file,request-size-limit@file"
       - "traefik.http.routers.backend-api.service=backend-api-svc"
-      - "traefik.http.routers.backend-api-auth.rule=Host(`api.gla1v3.local`) && PathPrefix(`/api/auth`)"
-      - "traefik.http.routers.backend-api-auth.entrypoints=websecure"
-      - "traefik.http.routers.backend-api-auth.tls=true"
-      - "traefik.http.routers.backend-api-auth.middlewares=rate-limit@file,request-size-limit@file"
-      - "traefik.http.routers.backend-api-auth.service=backend-api-svc"
       - "traefik.http.services.backend-api-svc.loadbalancer.server.port=3000"
       - "traefik.http.routers.c2-beacon.rule=Host(`c2.gla1v3.local`) && PathPrefix(`/beacon`)"
       - "traefik.http.routers.c2-beacon.entrypoints=c2"
       - "traefik.http.routers.c2-beacon.tls=true"
-      - "traefik.http.routers.c2-beacon.tls.options=mtls@file"
+      - "traefik.http.routers.c2-beacon.tls.options=default"
       - "traefik.http.routers.c2-beacon.middlewares=pass-client-cert@file,rate-limit@file,request-size-limit@file"
       - "traefik.http.routers.c2-beacon.service=c2-svc"
       - "traefik.http.services.c2-svc.loadbalancer.server.port=3001"
       - "traefik.http.routers.c2-root.rule=Host(`c2.gla1v3.local`) && PathPrefix(`/`)"
       - "traefik.http.routers.c2-root.entrypoints=c2"
       - "traefik.http.routers.c2-root.tls=true"
-      - "traefik.http.routers.c2-root.tls.options=mtls@file"
+      - "traefik.http.routers.c2-root.tls.options=default"
       - "traefik.http.routers.c2-root.middlewares=pass-client-cert@file,rate-limit@file,request-size-limit@file"
       - "traefik.http.routers.c2-root.service=c2-svc"
       - "traefik.http.routers.c2-health.rule=Host(`c2.gla1v3.local`) && Path(`/health`)"
@@ -143,9 +136,7 @@ volumes:
     driver: local
   redis-data:
     driver: local
-  wazuh-logs:
-    name: wazuh_wazuh-logs
-    external: true
+
 
 networks:
   gla1v3-net:

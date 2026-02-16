@@ -31,6 +31,24 @@ Every component uses encryption and authentication. Agent communications use mut
 - **[Getting Started](docs/GETTING_STARTED.md)** - Setup and first-time configuration
 - **[Architecture](docs/ARCHITECTURE.md)** - System design and components
 - **[Security](docs/SECURITY.md)** - Security features and best practices
+- **[Security Limitations](docs/SECURITY_LIMITATIONS.md)** - Token/certificate management and limitations
+
+### Developer Docs
+- **[Agents Build Guide](docs/developer/AGENTS_BUILD.md)** - Building and deploying agents
+- **[Agent Modules](docs/developer/AGENT_MODULES.md)** - Agent package structure and extensibility
+- **[Task Reference](docs/developer/TASK_REFERENCE.md)** - Complete agent task API
+- **[Features Roadmap](docs/developer/FEATURES_ROADMAP.md)** - Planned agent enhancements
+
+### Architecture Details
+- **[Agents](docs/architecture/AGENTS.md)** - Agent lifecycle and capabilities
+- **[Backend](docs/architecture/BACKEND.md)** - API server architecture
+- **[Frontend](docs/architecture/FRONTEND.md)** - Dashboard UI components
+- **[CA Service](docs/architecture/CA_SERVICE.md)** - Certificate authority
+- **[Traefik](docs/architecture/TRAEFIK.md)** - Reverse proxy configuration
+- **[Wazuh](docs/architecture/WAZUH.md)** - EDR integration
+
+### API Reference
+- **[Tenants API](docs/api/tenants.md)** - Multi-tenant API documentation
 
 ## Project Status
 

@@ -1,8 +1,7 @@
 #Requires -Version 5.1
 
 $ErrorActionPreference = "Stop"
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $ScriptDir
+Set-Location (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  Gla1v3 Database Startup" -ForegroundColor Cyan
@@ -18,7 +17,7 @@ if (-not (Test-Path .env)) {
     # Generate secure password
     $bytes = New-Object byte[] 32
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-    $DB_PASSWORD = [Convert]::ToBase64String($bytes) -replace '[+/=]', '' | Select-Object -First 32
+    $DB_PASSWORD = ([Convert]::ToBase64String($bytes) -replace '[+/=]', '').Substring(0, 32)
     
     @"
 # PostgreSQL Configuration
@@ -33,7 +32,7 @@ BACKUP_KEEP_DAYS=7
 
 # Start database
 Write-Host "Starting PostgreSQL database..." -ForegroundColor White
-docker-compose -f docker-compose.db.yml up -d
+docker-compose -f ../../db/docker-compose.db.yml up -d
 
 Write-Host ""
 Write-Host "Waiting for database to be healthy..." -ForegroundColor White
@@ -42,7 +41,7 @@ $elapsed = 0
 $ready = $false
 
 while ($elapsed -lt $timeout) {
-    $result = docker exec gla1v3-postgres pg_isready -U gla1v3_app -d gla1v3 2>$null
+    docker exec gla1v3-postgres pg_isready -U gla1v3_app -d gla1v3 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✅ Database is ready!" -ForegroundColor Green
         $ready = $true
@@ -56,7 +55,7 @@ while ($elapsed -lt $timeout) {
 if (-not $ready) {
     Write-Host ""
     Write-Host "❌ Database failed to start within $timeout seconds" -ForegroundColor Red
-    docker-compose -f docker-compose.db.yml logs postgres
+    docker-compose -f ../../db/docker-compose.db.yml logs postgres
     exit 1
 }
 
@@ -127,7 +126,7 @@ Write-Host "✅ Schema updates applied" -ForegroundColor Green
 
 # Apply migrations
 Write-Host "Applying database migrations..." -ForegroundColor White
-Get-ChildItem -Path ".\migrations\*.sql" | Sort-Object Name | ForEach-Object {
+Get-ChildItem -Path "..\..\db\migrations\*.sql" | Sort-Object Name | ForEach-Object {
     Write-Host "  Applying migration: $($_.Name)" -ForegroundColor Gray
     $ErrorActionPreference = 'Continue'
     docker exec gla1v3-postgres psql -U gla1v3_app -d gla1v3 -f "/migrations/$($_.Name)" 2>$null | Out-Null
