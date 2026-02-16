@@ -15,8 +15,8 @@ entryPoints:
         readTimeout: 30s
 
 providers:
-  docker:
-    exposedByDefault: false
+  # docker:
+  #   exposedByDefault: false
   file:
     filename: /etc/traefik/dynamic.yml
 
