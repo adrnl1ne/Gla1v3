@@ -62,7 +62,7 @@ Gla1v3 is actively developed and suitable for testing environments. Core feature
 Badges (replace OWNER/REPO in the URLs with your GitHub repo):
 
 - CI workflow badge (replace OWNER/REPO):
-  ![CI workflow](https://github.com/adrn1ne/Gla1v3/actions/workflows/test-backend.yml/badge.svg)
+  [![codecov](https://codecov.io/gh/adrnl1ne/Gla1v3/branch/main/graph/badge.svg?token=DFME9ITWLN)](https://codecov.io/gh/adrnl1ne/Gla1v3)
 
 - Coverage badge (replace OWNER/REPO):
   ![Codecov](https://codecov.io/gh/adrn1ne/Gla1v3/branch/main/graph/badge.svg)
