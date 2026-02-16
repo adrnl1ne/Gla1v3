@@ -279,6 +279,53 @@ Expected: `wazuh`, `opensearch`, `wazuh-indexer` containers running.
 2. Wazuh will be available to the backend via configured API URL
 3. Use the dashboard `Alert Table` to view correlated EDR detections
 
+#### Deploying Wazuh Agents
+
+To get full EDR visibility, deploy Wazuh agents on your test/target machines alongside Gla1v3 agents:
+
+**Download Wazuh Agent:**
+- Visit: https://packages.wazuh.com/4.x/windows/wazuh-agent-4.x.x-x.msi (Windows)
+- Visit: https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/ (Linux)
+- Or use package managers: `apt install wazuh-agent` (Ubuntu/Debian)
+
+**Install and Configure:**
+
+**Windows:**
+```powershell
+# Download and install MSI
+msiexec /i wazuh-agent-4.x.x-x.msi /q WAZUH_MANAGER="localhost" WAZUH_REGISTRATION_SERVER="localhost"
+
+# Or configure after installation
+& "C:\Program Files (x86)\ossec-agent\agent-auth.exe" -m localhost
+& "C:\Program Files (x86)\ossec-agent\ossec-control.exe" start
+```
+
+**Linux:**
+```bash
+# Install package
+wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.x.x-x_amd64.deb
+sudo dpkg -i wazuh-agent_4.x.x-x_amd64.deb
+
+# Configure manager IP
+sudo sed -i 's/MANAGER_IP/localhost/g' /var/ossec/etc/ossec.conf
+
+# Register and start
+sudo /var/ossec/bin/agent-auth -m localhost
+sudo systemctl enable wazuh-agent
+sudo systemctl start wazuh-agent
+```
+
+**Verify Agent Connection:**
+```bash
+# Check agent status
+sudo /var/ossec/bin/ossec-control status
+
+# Check manager connection
+sudo tail -f /var/ossec/logs/ossec.log
+```
+
+**Expected**: Agent appears as "Active" in Wazuh Dashboard → Agents section
+
 #### Wazuh Access
 - **Wazuh API**: https://localhost:55001 (user: `wazuh` / pass: `wazuh`)
 - **Dashboard**: https://localhost:8443
