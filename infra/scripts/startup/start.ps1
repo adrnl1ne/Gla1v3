@@ -29,7 +29,7 @@ if ($missing.Count -gt 0) {
 }
 
 # Sync DB_PASSWORD to database .env
-Write-Host "[1/4] Synchronizing database configuration..." -ForegroundColor Yellow
+Write-Host "[1/5] Synchronizing database configuration..." -ForegroundColor Yellow
 $dbPassword = ($envContent | Select-String "DB_PASSWORD=(.+)" | ForEach-Object { $_.Matches.Groups[1].Value })
 if (Test-Path "$PSScriptRoot\..\database\.env") {
     $dbEnvContent = Get-Content "$PSScriptRoot\..\database\.env" -Raw
@@ -74,7 +74,7 @@ NODE_ENV=development
 }
 
 Write-Host ""
-Write-Host "[2/4] Starting PostgreSQL database..." -ForegroundColor Yellow
+Write-Host "[2/5] Starting PostgreSQL database..." -ForegroundColor Yellow
 if (Test-Path "$PSScriptRoot\..\database") {
     Set-Location "$PSScriptRoot\..\database"
     & .\start-db.ps1
@@ -82,7 +82,7 @@ if (Test-Path "$PSScriptRoot\..\database") {
     Write-Host ""
 }
 
-Write-Host "[3/4] Generating session certificates..." -ForegroundColor Yellow
+Write-Host "[3/5] Generating session certificates..." -ForegroundColor Yellow
 & "$PSScriptRoot\..\certgen\generate_session_certs.ps1"
 
 if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
@@ -91,103 +91,7 @@ if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
 }
 
 Write-Host ""
-Write-Host "[3.5/6] Configuring hosts file for local domains..." -ForegroundColor Yellow
-$hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
-$hostsEntries = @(
-    "127.0.0.1 dashboard.gla1v3.local",
-    "127.0.0.1 api.gla1v3.local",
-    "127.0.0.1 c2.gla1v3.local",
-    "127.0.0.1 ca.gla1v3.local"
-)
-
-# Check if running as administrator
-$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-$isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-
-if (-not $isAdmin) {
-    Write-Host "→ Requesting administrator privileges to modify hosts file..." -ForegroundColor Yellow
-    
-    # Create a temporary script for the elevated process
-    $tempScript = @"
-`$hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
-`$hostsEntries = @(
-    "127.0.0.1 dashboard.gla1v3.local",
-    "127.0.0.1 api.gla1v3.local",
-    "127.0.0.1 c2.gla1v3.local",
-    "127.0.0.1 ca.gla1v3.local"
-)
-
-try {
-    `$hostsContent = Get-Content `$hostsPath -Raw -ErrorAction Stop
-    `$modified = `$false
-    
-    foreach (`$entry in `$hostsEntries) {
-        if (`$hostsContent -notmatch [regex]::Escape(`$entry)) {
-            Add-Content `$hostsPath `$entry -ErrorAction Stop
-            `$modified = `$true
-        }
-    }
-    
-    if (`$modified) {
-        Write-Host "✓ Added Gla1v3 domains to hosts file" -ForegroundColor Green
-    } else {
-        Write-Host "✓ Gla1v3 domains already configured in hosts file" -ForegroundColor Green
-    }
-} catch {
-    Write-Host "✗ Failed to modify hosts file: `$(`$_.Exception.Message)" -ForegroundColor Red
-    Write-Host "   Please manually add these entries to `$hostsPath :" -ForegroundColor Yellow
-    foreach (`$entry in `$hostsEntries) {
-        Write-Host "   `$entry" -ForegroundColor White
-    }
-}
-"@
-
-    $tempScriptPath = [System.IO.Path]::GetTempFileName() + ".ps1"
-    $tempScript | Out-File -FilePath $tempScriptPath -Encoding UTF8
-    
-    try {
-        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$tempScriptPath`"" -Verb RunAs -Wait
-    } catch {
-        Write-Host "✗ Failed to launch elevated process" -ForegroundColor Red
-        Write-Host "   Please manually add these entries to $hostsPath :" -ForegroundColor Yellow
-        foreach ($entry in $hostsEntries) {
-            Write-Host "   $entry" -ForegroundColor White
-        }
-    } finally {
-        # Clean up temp file
-        if (Test-Path $tempScriptPath) {
-            Remove-Item $tempScriptPath -Force
-        }
-    }
-} else {
-    # Already running as admin, modify directly
-    $hostsContent = Get-Content $hostsPath -Raw -ErrorAction SilentlyContinue
-    if (-not $hostsContent) {
-        Write-Host "⚠️  Could not read hosts file. Manual configuration may be required." -ForegroundColor Yellow
-    } else {
-        $modified = $false
-        foreach ($entry in $hostsEntries) {
-            if ($hostsContent -notmatch [regex]::Escape($entry)) {
-                try {
-                    Add-Content $hostsPath $entry -ErrorAction Stop
-                    $modified = $true
-                } catch {
-                    Write-Host "⚠️  Failed to modify hosts file: $($_.Exception.Message)" -ForegroundColor Yellow
-                    break
-                }
-            }
-        }
-        
-        if ($modified) {
-            Write-Host "✓ Added Gla1v3 domains to hosts file" -ForegroundColor Green
-        } else {
-            Write-Host "✓ Gla1v3 domains already configured in hosts file" -ForegroundColor Green
-        }
-    }
-}
-
-Write-Host ""
-Write-Host "[4/6] Starting Docker services..." -ForegroundColor Yellow
+Write-Host "[4/5] Starting Docker services..." -ForegroundColor Yellow
 Set-Location "$PSScriptRoot\.."
 docker compose --env-file ../../.env up -d --build
 
@@ -197,7 +101,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
-Write-Host "[5/6] Starting Wazuh EDR (optional)..." -ForegroundColor Yellow
+Write-Host "Starting Wazuh EDR (optional)..." -ForegroundColor Yellow
 if (Test-Path "$PSScriptRoot\..\..\wazuh") {
     Write-Host "→ Wazuh folder detected — starting optional EDR stack" -ForegroundColor Cyan
     Set-Location "$PSScriptRoot\..\..\wazuh"
@@ -213,7 +117,7 @@ if (Test-Path "$PSScriptRoot\..\..\wazuh") {
 }
 
 Write-Host ""
-Write-Host "[6/6] Verifying services..." -ForegroundColor Yellow
+Write-Host "[5/5] Verifying services..." -ForegroundColor Yellow
 Start-Sleep -Seconds 3
 $running = docker ps --filter "name=gla1v3" --format "{{.Names}}" | Measure-Object | Select-Object -ExpandProperty Count
 Write-Host "✓ $running core services running" -ForegroundColor Green

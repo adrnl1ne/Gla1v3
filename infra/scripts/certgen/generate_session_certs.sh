@@ -2,7 +2,11 @@
 set -e
 
 # Write generated certs to repo-root `certs/` (standardised)
-OUT_DIR="$(cd "$(dirname "$0")" && cd ../.. && pwd)/certs"
+# Calculate path: infra/scripts/certgen -> infra -> root -> certs
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"      # infra/scripts/certgen
+INFRA_DIR="$(dirname "$SCRIPT_DIR")"             # infra/scripts -> infra
+REPO_ROOT="$(dirname "$INFRA_DIR")"              # infra -> repo root
+OUT_DIR="$REPO_ROOT/certs"
 mkdir -p "$OUT_DIR"
 cd "$OUT_DIR"
 

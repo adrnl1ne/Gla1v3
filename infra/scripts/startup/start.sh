@@ -13,7 +13,7 @@ if [ ! -f "$ROOT_ENV" ]; then
 fi
 
 # Sync DB_PASSWORD to database .env
-echo "[1/4] Synchronizing database configuration..."
+echo "[1/5] Synchronizing database configuration..."
 DB_PASSWORD=$(grep "^DB_PASSWORD=" "$ROOT_ENV" | cut -d'=' -f2)
 if [ -f "$(dirname "$0")/../database/.env" ]; then
     sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" "$(dirname "$0")/../database/.env"
@@ -55,7 +55,7 @@ fi
 
 # Check if database is running, start if not
 if ! docker ps | grep -q gla1v3-postgres; then
-    echo "[2/4] Database not running. Starting database..."
+    echo "[2/5] Database not running. Starting database..."
     if [ -d "$(dirname "$0")/../database" ] && [ -f "$(dirname "$0")/../database/start-db.sh" ]; then
         cd "$(dirname "$0")/../database"
         if bash start-db.sh; then
@@ -70,7 +70,7 @@ if ! docker ps | grep -q gla1v3-postgres; then
     echo ""
 fi
 
-echo "[3/4] Generating session certificates..."
+echo "[3/5] Generating session certificates..."
 if [ -f "$(dirname "$0")/../certgen/generate_session_certs.sh" ]; then
     if bash "$(dirname "$0")/../certgen/generate_session_certs.sh"; then
         echo "✓ Certificates generated successfully"
@@ -82,69 +82,7 @@ else
 fi
 
 echo ""
-echo "[3.5/6] Configuring hosts file for local domains..."
-HOSTS_ENTRIES=(
-    "127.0.0.1 dashboard.gla1v3.local"
-    "127.0.0.1 api.gla1v3.local"
-    "127.0.0.1 c2.gla1v3.local"
-    "127.0.0.1 ca.gla1v3.local"
-)
-
-HOSTS_FILE="/etc/hosts"
-
-# Function to modify hosts file with sudo
-modify_hosts() {
-    MODIFIED=false
-    
-    for entry in "${HOSTS_ENTRIES[@]}"; do
-        if ! grep -q "^$entry$" "$HOSTS_FILE"; then
-            echo "$entry" | sudo tee -a "$HOSTS_FILE" > /dev/null
-            MODIFIED=true
-        fi
-    done
-    
-    if [ "$MODIFIED" = true ]; then
-        echo "✓ Added Gla1v3 domains to hosts file"
-    else
-        echo "✓ Gla1v3 domains already configured in hosts file"
-    fi
-}
-
-# Check if we can write to hosts file without sudo
-if [ -w "$HOSTS_FILE" ]; then
-    # Already have write access
-    MODIFIED=false
-    for entry in "${HOSTS_ENTRIES[@]}"; do
-        if ! grep -q "^$entry$" "$HOSTS_FILE"; then
-            echo "$entry" >> "$HOSTS_FILE"
-            MODIFIED=true
-        fi
-    done
-    
-    if [ "$MODIFIED" = true ]; then
-        echo "✓ Added Gla1v3 domains to hosts file"
-    else
-        echo "✓ Gla1v3 domains already configured in hosts file"
-    fi
-else
-    # Need sudo - try to run with sudo
-    echo "→ Requesting sudo access to modify hosts file..."
-    if sudo -v 2>/dev/null; then
-        # sudo access granted, modify hosts file
-        modify_hosts
-    else
-        echo "⚠️  sudo access required to modify hosts file"
-        echo "   Please run this script with sudo or manually add these entries to /etc/hosts:"
-        for entry in "${HOSTS_ENTRIES[@]}"; do
-            echo "   $entry"
-        done
-        echo ""
-        echo "   Or run: sudo $0"
-    fi
-fi
-
-echo ""
-echo "[4/6] Starting Docker services..."
+echo "[4/5] Starting Docker services..."
 cd "$(dirname "$0")/.."
 
 # Try newer docker compose syntax first, fall back to older docker-compose
@@ -167,7 +105,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo ""
-echo "[5/6] Starting Wazuh EDR (optional)..."
+echo "Starting Wazuh EDR (optional)..."
 if [ -d "$(dirname "$0")/../../wazuh" ]; then
     echo "→ Wazuh folder detected — starting optional EDR stack"
     cd "$(dirname "$0")/../../wazuh"
@@ -179,7 +117,7 @@ else
 fi
 
 echo ""
-echo "[6/6] Verifying services..."
+echo "[5/5] Verifying services..."
 sleep 3
 RUNNING=$(docker ps --filter "name=gla1v3" --format "{{.Names}}" | wc -l)
 echo "✓ $RUNNING core services running"

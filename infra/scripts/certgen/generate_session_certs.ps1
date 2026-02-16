@@ -7,7 +7,11 @@ function Invoke-OpenSSL {
 }
 
 # Write generated certs to repo-root `certs/` (standardised)
-$OUT_DIR = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) "certs"
+# Calculate path: infra/scripts/certgen -> infra -> root -> certs
+$scriptDir = Split-Path $PSScriptRoot -Parent  # infra/scripts
+$infraDir = Split-Path $scriptDir -Parent      # infra  
+$repoRoot = Split-Path $infraDir -Parent       # repo root
+$OUT_DIR = Join-Path $repoRoot "certs"
 New-Item -ItemType Directory -Force -Path $OUT_DIR | Out-Null
 Push-Location $OUT_DIR
 
