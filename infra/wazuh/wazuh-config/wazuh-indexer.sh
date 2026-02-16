@@ -24,7 +24,7 @@ fi
 while true; do
   if [ -f "$ALERT_FILE" ]; then
     CURRENT_SIZE=$(wc -c < "$ALERT_FILE")
-    
+
     # If file has grown, read new content
     if [ "$CURRENT_SIZE" -gt "$LAST_POSITION" ]; then
       # Read the tail of the file to get new alerts
@@ -36,12 +36,12 @@ while true; do
             timestamp=$(date +%Y-%m-%d)
           fi
           index_name="wazuh-alerts-${timestamp}"
-          
+
           # Send to OpenSearch
           response=$(echo "$alert" | curl -s -X POST "http://opensearch:9200/${index_name}/_doc" \
             -H "Content-Type: application/json" \
             -d @- 2>&1)
-          
+
           if echo "$response" | grep -q '"_id"'; then
             echo "✓ Indexed alert to ${index_name}"
           else
@@ -49,10 +49,10 @@ while true; do
           fi
         fi
       done
-      
+
       LAST_POSITION=$CURRENT_SIZE
     fi
   fi
-  
+
   sleep 3
 done
