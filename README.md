@@ -59,13 +59,10 @@ Gla1v3 is actively developed and suitable for testing environments. Core feature
 - Backend unit tests run on push/PR via GitHub Actions (`.github/workflows/test-backend.yml`).
 - Coverage is uploaded to Codecov (project target: **60%** for services).
 
-Badges (replace OWNER/REPO in the URLs with your GitHub repo):
+Badges:
 
-- CI workflow badge (replace OWNER/REPO):
+- Coverage badge:
   [![codecov](https://codecov.io/gh/adrnl1ne/Gla1v3/branch/main/graph/badge.svg?token=DFME9ITWLN)](https://codecov.io/gh/adrnl1ne/Gla1v3)
-
-- Coverage badge (replace OWNER/REPO):
-  ![Codecov](https://codecov.io/gh/adrn1ne/Gla1v3/branch/main/graph/badge.svg)
 
 
 **Current Capabilities:**
