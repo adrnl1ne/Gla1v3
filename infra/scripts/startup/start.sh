@@ -56,14 +56,30 @@ fi
 # Check if database is running, start if not
 if ! docker ps | grep -q gla1v3-postgres; then
     echo "[2/4] Database not running. Starting database..."
-    cd "$(dirname "$0")/db"
-    bash start-db.sh
-    cd "$(dirname "$0")"
+    if [ -d "$(dirname "$0")/../database" ] && [ -f "$(dirname "$0")/../database/start-db.sh" ]; then
+        cd "$(dirname "$0")/../database"
+        if bash start-db.sh; then
+            echo "✓ Database started successfully"
+        else
+            echo "⚠️  Database startup failed, but continuing with main services..."
+        fi
+        cd "$(dirname "$0")"
+    else
+        echo "⚠️  Database scripts not found at $(dirname "$0")/../database/"
+    fi
     echo ""
 fi
 
 echo "[3/4] Generating session certificates..."
-bash "$(dirname "$0")/../certgen/generate_session_certs.sh"
+if [ -f "$(dirname "$0")/../certgen/generate_session_certs.sh" ]; then
+    if bash "$(dirname "$0")/../certgen/generate_session_certs.sh"; then
+        echo "✓ Certificates generated successfully"
+    else
+        echo "⚠️  Certificate generation failed, but continuing..."
+    fi
+else
+    echo "⚠️  Certificate generation script not found"
+fi
 
 echo ""
 echo "[3.5/6] Configuring hosts file for local domains..."
@@ -75,28 +91,78 @@ HOSTS_ENTRIES=(
 )
 
 HOSTS_FILE="/etc/hosts"
-MODIFIED=false
 
-for entry in "${HOSTS_ENTRIES[@]}"; do
-    if ! grep -q "^$entry$" "$HOSTS_FILE"; then
-        echo "$entry" | sudo tee -a "$HOSTS_FILE" > /dev/null
-        MODIFIED=true
+# Function to modify hosts file with sudo
+modify_hosts() {
+    MODIFIED=false
+    
+    for entry in "${HOSTS_ENTRIES[@]}"; do
+        if ! grep -q "^$entry$" "$HOSTS_FILE"; then
+            echo "$entry" | sudo tee -a "$HOSTS_FILE" > /dev/null
+            MODIFIED=true
+        fi
+    done
+    
+    if [ "$MODIFIED" = true ]; then
+        echo "✓ Added Gla1v3 domains to hosts file"
+    else
+        echo "✓ Gla1v3 domains already configured in hosts file"
     fi
-done
+}
 
-if [ "$MODIFIED" = true ]; then
-    echo "✓ Added Gla1v3 domains to hosts file"
+# Check if we can write to hosts file without sudo
+if [ -w "$HOSTS_FILE" ]; then
+    # Already have write access
+    MODIFIED=false
+    for entry in "${HOSTS_ENTRIES[@]}"; do
+        if ! grep -q "^$entry$" "$HOSTS_FILE"; then
+            echo "$entry" >> "$HOSTS_FILE"
+            MODIFIED=true
+        fi
+    done
+    
+    if [ "$MODIFIED" = true ]; then
+        echo "✓ Added Gla1v3 domains to hosts file"
+    else
+        echo "✓ Gla1v3 domains already configured in hosts file"
+    fi
 else
-    echo "✓ Gla1v3 domains already configured in hosts file"
+    # Need sudo - try to run with sudo
+    echo "→ Requesting sudo access to modify hosts file..."
+    if sudo -v 2>/dev/null; then
+        # sudo access granted, modify hosts file
+        modify_hosts
+    else
+        echo "⚠️  sudo access required to modify hosts file"
+        echo "   Please run this script with sudo or manually add these entries to /etc/hosts:"
+        for entry in "${HOSTS_ENTRIES[@]}"; do
+            echo "   $entry"
+        done
+        echo ""
+        echo "   Or run: sudo $0"
+    fi
 fi
 
 echo ""
 echo "[4/6] Starting Docker services..."
 cd "$(dirname "$0")/.."
-docker compose --env-file ../../.env up -d --build
+
+# Try newer docker compose syntax first, fall back to older docker-compose
+if command -v docker > /dev/null && docker compose version > /dev/null 2>&1; then
+    DOCKER_COMPOSE_CMD="docker compose"
+elif command -v docker-compose > /dev/null; then
+    DOCKER_COMPOSE_CMD="docker-compose"
+else
+    echo "✗ Neither 'docker compose' nor 'docker-compose' found. Please install Docker."
+    exit 1
+fi
+
+$DOCKER_COMPOSE_CMD --env-file ../../.env up -d --build
 
 if [ $? -ne 0 ]; then
     echo "✗ Docker startup failed!"
+    echo "  Make sure Docker is running and you have permission to use it."
+    echo "  On Linux, you may need to run: sudo usermod -aG docker \$USER"
     exit 1
 fi
 
@@ -105,7 +171,7 @@ echo "[5/6] Starting Wazuh EDR (optional)..."
 if [ -d "$(dirname "$0")/../../wazuh" ]; then
     echo "→ Wazuh folder detected — starting optional EDR stack"
     cd "$(dirname "$0")/../../wazuh"
-    docker compose up -d || echo "⚠️  Wazuh EDR failed to start (platform will work without EDR)"
+    $DOCKER_COMPOSE_CMD up -d || echo "⚠️  Wazuh EDR failed to start (platform will work without EDR)"
     echo "✓ Wazuh EDR start attempted"
     cd "$(dirname "$0")"
 else

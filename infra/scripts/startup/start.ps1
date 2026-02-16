@@ -100,20 +100,90 @@ $hostsEntries = @(
     "127.0.0.1 ca.gla1v3.local"
 )
 
-$hostsContent = Get-Content $hostsPath -Raw
-$modified = $false
+# Check if running as administrator
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+$isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
-foreach ($entry in $hostsEntries) {
-    if ($hostsContent -notmatch [regex]::Escape($entry)) {
-        Add-Content $hostsPath $entry
-        $modified = $true
+if (-not $isAdmin) {
+    Write-Host "→ Requesting administrator privileges to modify hosts file..." -ForegroundColor Yellow
+    
+    # Create a temporary script for the elevated process
+    $tempScript = @"
+`$hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
+`$hostsEntries = @(
+    "127.0.0.1 dashboard.gla1v3.local",
+    "127.0.0.1 api.gla1v3.local",
+    "127.0.0.1 c2.gla1v3.local",
+    "127.0.0.1 ca.gla1v3.local"
+)
+
+try {
+    `$hostsContent = Get-Content `$hostsPath -Raw -ErrorAction Stop
+    `$modified = `$false
+    
+    foreach (`$entry in `$hostsEntries) {
+        if (`$hostsContent -notmatch [regex]::Escape(`$entry)) {
+            Add-Content `$hostsPath `$entry -ErrorAction Stop
+            `$modified = `$true
+        }
+    }
+    
+    if (`$modified) {
+        Write-Host "✓ Added Gla1v3 domains to hosts file" -ForegroundColor Green
+    } else {
+        Write-Host "✓ Gla1v3 domains already configured in hosts file" -ForegroundColor Green
+    }
+} catch {
+    Write-Host "✗ Failed to modify hosts file: `$(`$_.Exception.Message)" -ForegroundColor Red
+    Write-Host "   Please manually add these entries to `$hostsPath :" -ForegroundColor Yellow
+    foreach (`$entry in `$hostsEntries) {
+        Write-Host "   `$entry" -ForegroundColor White
     }
 }
+"@
 
-if ($modified) {
-    Write-Host "✓ Added Gla1v3 domains to hosts file" -ForegroundColor Green
+    $tempScriptPath = [System.IO.Path]::GetTempFileName() + ".ps1"
+    $tempScript | Out-File -FilePath $tempScriptPath -Encoding UTF8
+    
+    try {
+        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$tempScriptPath`"" -Verb RunAs -Wait
+    } catch {
+        Write-Host "✗ Failed to launch elevated process" -ForegroundColor Red
+        Write-Host "   Please manually add these entries to $hostsPath :" -ForegroundColor Yellow
+        foreach ($entry in $hostsEntries) {
+            Write-Host "   $entry" -ForegroundColor White
+        }
+    } finally {
+        # Clean up temp file
+        if (Test-Path $tempScriptPath) {
+            Remove-Item $tempScriptPath -Force
+        }
+    }
 } else {
-    Write-Host "✓ Gla1v3 domains already configured in hosts file" -ForegroundColor Green
+    # Already running as admin, modify directly
+    $hostsContent = Get-Content $hostsPath -Raw -ErrorAction SilentlyContinue
+    if (-not $hostsContent) {
+        Write-Host "⚠️  Could not read hosts file. Manual configuration may be required." -ForegroundColor Yellow
+    } else {
+        $modified = $false
+        foreach ($entry in $hostsEntries) {
+            if ($hostsContent -notmatch [regex]::Escape($entry)) {
+                try {
+                    Add-Content $hostsPath $entry -ErrorAction Stop
+                    $modified = $true
+                } catch {
+                    Write-Host "⚠️  Failed to modify hosts file: $($_.Exception.Message)" -ForegroundColor Yellow
+                    break
+                }
+            }
+        }
+        
+        if ($modified) {
+            Write-Host "✓ Added Gla1v3 domains to hosts file" -ForegroundColor Green
+        } else {
+            Write-Host "✓ Gla1v3 domains already configured in hosts file" -ForegroundColor Green
+        }
+    }
 }
 
 Write-Host ""
