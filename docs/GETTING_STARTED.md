@@ -55,9 +55,9 @@ cd infra
 
 Run the startup script:
 
-**Windows:** `.\start.ps1`
+**Windows:** `.\scripts\startup\start.ps1`
 
-**Linux/Mac:** `chmod +x start.sh && ./start.sh`
+**Linux/Mac:** `chmod +x scripts/startup/start.sh && ./scripts/startup/start.sh`
 
 The startup script will:
 1. Generate secure certificates for mTLS
@@ -275,7 +275,7 @@ docker compose ps
 Expected: `wazuh`, `opensearch`, `wazuh-indexer` containers running.
 
 #### Integrating with Gla1v3
-1. Start main C2 infra first: `cd infra && docker compose up -d`
+1. Start main C2 infra first: `cd infra && .\scripts\startup\start.ps1` (Windows) or `cd infra && ./scripts/startup/start.sh` (Linux/Mac)
 2. Wazuh will be available to the backend via configured API URL
 3. Use the dashboard `Alert Table` to view correlated EDR detections
 
@@ -344,7 +344,7 @@ sudo tail -f /var/ossec/logs/ossec.log
 
 - **Additional 4GB RAM** for OpenSearch and Wazuh containers
 - **10GB disk space** for alert indexing
-- Main infrastructure must be running first
+- Main infrastructure must be running first (use `.\scripts\startup\start.ps1` on Windows or `./scripts/startup/start.sh` on Linux/Mac)
 
 ### Without Wazuh
 
@@ -381,7 +381,7 @@ If you skip Wazuh:
 ### Wazuh Won't Start
 **Issue**: Wazuh EDR fails to start or shows errors  
 **Solutions**:
-- Ensure main infrastructure is running first (`cd infra && docker compose ps`)
+- Ensure main infrastructure is running first (run `.\scripts\startup\start.ps1` on Windows or `./scripts/startup/start.sh` on Linux/Mac)
 - Check if you have 12GB+ RAM available (Wazuh needs 4GB extra)
 - Verify network exists: `docker network ls | grep wazuh-net`
 - Try manual start: `cd infra/wazuh && docker compose up -d`
