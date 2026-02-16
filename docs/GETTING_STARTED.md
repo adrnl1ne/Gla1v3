@@ -17,7 +17,18 @@ Before you begin, ensure you have:
 ### System Configuration
 
 #### Windows Users
-No additional configuration needed - the PowerShell script handles everything automatically.
+Enable PowerShell script execution and install OpenSSL:
+
+1. **Enable Script Execution** (run as Administrator):
+   ```powershell
+   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine
+   ```
+
+2. **Install OpenSSL**:
+   - Download from: https://slproweb.com/products/Win32OpenSSL.html
+   - Install the "Win64 OpenSSL v3.x.x" MSI
+   - Choose "The OpenSSL binaries (/bin) directory" option during installation
+   - Add OpenSSL to PATH: `C:\Program Files\OpenSSL-Win64\bin`
 
 #### Linux/Mac Users
 Ensure your user is in the docker group:
