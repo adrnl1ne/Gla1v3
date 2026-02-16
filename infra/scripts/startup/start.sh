@@ -66,6 +66,31 @@ echo "[3/4] Generating session certificates..."
 bash "$(dirname "$0")/../certgen/generate_session_certs.sh"
 
 echo ""
+echo "[3.5/6] Configuring hosts file for local domains..."
+HOSTS_ENTRIES=(
+    "127.0.0.1 dashboard.gla1v3.local"
+    "127.0.0.1 api.gla1v3.local"
+    "127.0.0.1 c2.gla1v3.local"
+    "127.0.0.1 ca.gla1v3.local"
+)
+
+HOSTS_FILE="/etc/hosts"
+MODIFIED=false
+
+for entry in "${HOSTS_ENTRIES[@]}"; do
+    if ! grep -q "^$entry$" "$HOSTS_FILE"; then
+        echo "$entry" | sudo tee -a "$HOSTS_FILE" > /dev/null
+        MODIFIED=true
+    fi
+done
+
+if [ "$MODIFIED" = true ]; then
+    echo "✓ Added Gla1v3 domains to hosts file"
+else
+    echo "✓ Gla1v3 domains already configured in hosts file"
+fi
+
+echo ""
 echo "[4/6] Starting Docker services..."
 cd "$(dirname "$0")/.."
 docker compose --env-file ../../.env up -d --build

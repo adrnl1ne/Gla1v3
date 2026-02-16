@@ -91,6 +91,32 @@ if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
 }
 
 Write-Host ""
+Write-Host "[3.5/6] Configuring hosts file for local domains..." -ForegroundColor Yellow
+$hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
+$hostsEntries = @(
+    "127.0.0.1 dashboard.gla1v3.local",
+    "127.0.0.1 api.gla1v3.local",
+    "127.0.0.1 c2.gla1v3.local",
+    "127.0.0.1 ca.gla1v3.local"
+)
+
+$hostsContent = Get-Content $hostsPath -Raw
+$modified = $false
+
+foreach ($entry in $hostsEntries) {
+    if ($hostsContent -notmatch [regex]::Escape($entry)) {
+        Add-Content $hostsPath $entry
+        $modified = $true
+    }
+}
+
+if ($modified) {
+    Write-Host "✓ Added Gla1v3 domains to hosts file" -ForegroundColor Green
+} else {
+    Write-Host "✓ Gla1v3 domains already configured in hosts file" -ForegroundColor Green
+}
+
+Write-Host ""
 Write-Host "[4/6] Starting Docker services..." -ForegroundColor Yellow
 Set-Location "$PSScriptRoot\.."
 docker compose --env-file ../../.env up -d --build
