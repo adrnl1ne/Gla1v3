@@ -19,6 +19,8 @@ services:
       - wazuh-etc:/var/ossec/etc
       - wazuh-logs:/var/ossec/logs
       - wazuh-data:/var/ossec/data
+      - ./wazuh-config/filebeat-embedded.yml:/etc/filebeat/filebeat.yml:ro
+      - ./wazuh-config/disable-filebeat-run.sh:/etc/services.d/filebeat/run:ro
     depends_on:
       - opensearch
     networks:
@@ -38,6 +40,21 @@ services:
     ports:
       - "9200:9200"
       - "9600:9600"
+    networks:
+      - wazuh-net
+
+  wazuh-indexer:
+    image: curlimages/curl:8.4.0
+    container_name: wazuh-indexer
+    restart: unless-stopped
+    user: root
+    depends_on:
+      - opensearch
+      - wazuh
+    volumes:
+      - wazuh-logs:/var/ossec/logs:ro
+      - ./wazuh-config/wazuh-indexer.sh:/usr/local/bin/wazuh-indexer.sh:ro
+    command: ["sh", "-c", "tr -d '\\r' < /usr/local/bin/wazuh-indexer.sh | sh"]
     networks:
       - wazuh-net
 
