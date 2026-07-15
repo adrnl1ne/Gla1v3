@@ -1,10 +1,10 @@
 # Gla1v3 C2 Framework
 
-A comprehensive Command & Control framework designed for purple team operations, combining offensive agent capabilities with defensive EDR monitoring.
+A comprehensive Command & Control framework designed for purple team operations, combining offensive agent capabilities with extensible SIEM/EDR integration.
 
 ## What is Gla1v3?
 
-Gla1v3 is a web-based platform that lets security teams deploy and manage agents on target systems while simultaneously monitoring detection responses through integrated EDR systems. Think of it as having both the attacker's and defender's view in one place.
+Gla1v3 is a web-based platform that lets security teams deploy and manage agents on target systems while simultaneously monitoring detection responses through integrated security tools. Think of it as having both the attacker's and defender's view in one place.
 
 **Built for:**
 - Red teamers conducting offensive security assessments
@@ -20,8 +20,8 @@ Deploy lightweight Go agents that communicate securely with the C2 server throug
 ### Real-Time Dashboard
 Monitor all agent activity through a web interface featuring a world map showing agent locations, status tracking, and task management. See exactly where your agents are and what they're doing.
 
-### EDR Integration
-Connect multiple EDR systems (Wazuh, CrowdStrike, SentinelOne) to correlate agent actions with security alerts. Understand what gets detected and what doesn't.
+### SIEM/EDR Integration
+Connect external SIEM and EDR systems to correlate agent actions with security alerts. The platform supports flexible integration with various security monitoring solutions.
 
 ### Secure by Design
 Every component uses encryption and authentication. Agent communications use mutual TLS, the dashboard requires JWT authentication, and all EDR queries are proxied through authenticated endpoints.
@@ -45,7 +45,6 @@ Every component uses encryption and authentication. Agent communications use mut
 - **[Frontend](docs/architecture/FRONTEND.md)** - Dashboard UI components
 - **[CA Service](docs/architecture/CA_SERVICE.md)** - Certificate authority
 - **[Traefik](docs/architecture/TRAEFIK.md)** - Reverse proxy configuration
-- **[Wazuh](docs/architecture/WAZUH.md)** - EDR integration
 
 ### API Reference
 - **[Tenants API](docs/api/tenants.md)** - Multi-tenant API documentation
@@ -69,13 +68,13 @@ Badges:
 - ✅ Agent deployment and management
 - ✅ Secure C2 communications via mTLS
 - ✅ Real-time dashboard with geolocation
-- ✅ Multi-EDR integration capability
+- ✅ SIEM/EDR integration capability
 - ✅ Task execution and result collection
 - ✅ Authentication and access control
 
 **Roadmap:**
 - 🔄 Enhanced process injection capabilities
-- 🔄 Additional EDR connectors
+- 🔄 Additional SIEM/EDR connectors
 - 🔄 Advanced persistence mechanisms
 - 🔄 Automated attack chains
 
@@ -86,7 +85,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - Inspired by MITRE's Caldera framework
-- EDR capabilities powered by Wazuh
 - Security frameworks based on MITRE ATT&CK and D3FEND
 
 ---

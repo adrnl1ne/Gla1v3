@@ -144,7 +144,7 @@ func SetupHosts(gateway string) error {
 	}
 	
 	// Add fresh entries with current gateway
-	entries := fmt.Sprintf("\n# Gla1v3 C2 (auto-added)\n%s api.gla1v3.local\n%s c2.gla1v3.local\n%s dashboard.gla1v3.local\n%s wazuh.gla1v3.local\n", gateway, gateway, gateway, gateway)
+	entries := fmt.Sprintf("\n# Gla1v3 C2 (auto-added)\n%s api.gla1v3.local\n%s c2.gla1v3.local\n%s dashboard.gla1v3.local\n", gateway, gateway, gateway)
 	newContent := strings.Join(cleanedLines, "\n") + entries
 	
 	// Write back

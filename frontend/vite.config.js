@@ -13,8 +13,7 @@ export default defineConfig({
       'dashboard.gla1v3.local',
       'api.gla1v3.local',
       'c2.gla1v3.local',
-      'traefik.gla1v3.local',
-      'wazuh.gla1v3.local'
+      'traefik.gla1v3.local'
     ]
   }
 })

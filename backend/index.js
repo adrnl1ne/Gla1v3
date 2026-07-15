@@ -14,16 +14,13 @@ const { authenticateJWT } = require('./middleware/auth');
 
 // Services
 const AuthService = require('./services/authService');
-const EDRService = require('./services/edrService');
 const tokenBlacklistService = require('./services/tokenBlacklistService');
-const WazuhIndexer = require('./utils/wazuhIndexer');
 const redisClient = require('./utils/redisClient');
 
 // Routes
 const authRoutes = require('./routes/auth');
 const agentRoutes = require('./routes/agents');
 const taskRoutes = require('./routes/tasks');
-const edrRoutes = require('./routes/edr');
 const buildRoutes = require('./routes/build');
 const tenantRoutes = require('./routes/tenants');
 const userRoutes = require('./routes/users');
@@ -36,12 +33,10 @@ validateSecrets();
   try {
     await redisClient.connect();
     await AuthService.initializeDefaultAdmin();
-    EDRService.initialize();
-    
+
     // Sync blacklist from database to Redis
     await tokenBlacklistService.syncFromDatabase();
-    
-    WazuhIndexer.startIndexer();
+
     console.log('✅ All services initialized');
   } catch (err) {
     console.error('❌ Error initializing services:', err);
@@ -104,7 +99,6 @@ app.use('/api/agents', agentRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api', edrRoutes); // /api/alerts/*, /api/edr-configs/*
 app.use('/api/build', buildRoutes);
 
 // C2 Routes (mTLS) - Mount agent beacon route

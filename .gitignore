@@ -14,3 +14,7 @@ frontend/dist/
 # VM ISOs and large files
 vm-templates/images/*.iso
 *.iso
+
+
+gla1v3_infra_revamp_brainstorm.html
+roadmap.md

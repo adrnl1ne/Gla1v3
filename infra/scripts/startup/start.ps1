@@ -29,7 +29,7 @@ if ($missing.Count -gt 0) {
 }
 
 # Sync DB_PASSWORD to database .env
-Write-Host "[1/5] Synchronizing database configuration..." -ForegroundColor Yellow
+Write-Host "[0/3] Synchronizing database configuration..." -ForegroundColor Yellow
 $dbPassword = ($envContent | Select-String "DB_PASSWORD=(.+)" | ForEach-Object { $_.Matches.Groups[1].Value })
 if (Test-Path "$PSScriptRoot\..\database\.env") {
     $dbEnvContent = Get-Content "$PSScriptRoot\..\database\.env" -Raw
@@ -43,10 +43,6 @@ DB_PASSWORD=$dbPassword
 BACKUP_KEEP_DAYS=7
 "@ | Out-File -FilePath "$PSScriptRoot\..\database\.env" -Encoding ASCII -NoNewline
 }
-
-# Ensure docker-compose picks up environment: use --env-file to read from root .env
-# (Removed copy to avoid duplicate .env file)
-Write-Host "[0/6] Using repo root .env for docker compose" -ForegroundColor Cyan
 
 # Sync DB_PASSWORD to root .env for backend
 $rootEnvPath = "$PSScriptRoot\..\..\..\.env"
@@ -73,8 +69,7 @@ NODE_ENV=development
 "@ | Out-File -FilePath $rootEnvPath -Encoding ASCII -NoNewline
 }
 
-Write-Host ""
-Write-Host "[2/5] Starting PostgreSQL database..." -ForegroundColor Yellow
+Write-Host "[1/3] Starting PostgreSQL database..." -ForegroundColor Yellow
 if (Test-Path "$PSScriptRoot\..\database") {
     Set-Location "$PSScriptRoot\..\database"
     & .\start-db.ps1
@@ -82,7 +77,7 @@ if (Test-Path "$PSScriptRoot\..\database") {
     Write-Host ""
 }
 
-Write-Host "[3/5] Generating session certificates..." -ForegroundColor Yellow
+Write-Host "[2/3] Generating session certificates..." -ForegroundColor Yellow
 & "$PSScriptRoot\..\certgen\generate_session_certs.ps1"
 
 if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
@@ -91,7 +86,7 @@ if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
 }
 
 Write-Host ""
-Write-Host "[4/5] Starting Docker services..." -ForegroundColor Yellow
+Write-Host "[3/3] Starting Docker services..." -ForegroundColor Yellow
 Set-Location "$PSScriptRoot\.."
 docker compose --env-file ../../.env up -d --build
 
@@ -101,23 +96,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
-Write-Host "Starting Wazuh EDR (optional)..." -ForegroundColor Yellow
-if (Test-Path "$PSScriptRoot\..\..\wazuh") {
-    Write-Host "→ Wazuh folder detected — starting optional EDR stack" -ForegroundColor Cyan
-    Set-Location "$PSScriptRoot\..\..\wazuh"
-    & docker compose up -d
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "⚠️  Wazuh EDR failed to start (platform will work without EDR)" -ForegroundColor Yellow
-    } else {
-        Write-Host "✓ Wazuh EDR started (if configured)" -ForegroundColor Green
-    }
-    Set-Location $PSScriptRoot
-} else {
-    Write-Host "→ No 'infra/wazuh' folder found; skipping optional EDR start" -ForegroundColor Yellow
-}
-
-Write-Host ""
-Write-Host "[5/5] Verifying services..." -ForegroundColor Yellow
+Write-Host "[3/3] Verifying services..." -ForegroundColor Yellow
 Start-Sleep -Seconds 3
 $running = docker ps --filter "name=gla1v3" --format "{{.Names}}" | Measure-Object | Select-Object -ExpandProperty Count
 Write-Host "✓ $running core services running" -ForegroundColor Green
@@ -130,9 +109,6 @@ Write-Host "  Dashboard: https://dashboard.gla1v3.local" -ForegroundColor White
 Write-Host "  API:       https://api.gla1v3.local" -ForegroundColor White
 Write-Host "  C2:        https://c2.gla1v3.local" -ForegroundColor White
 Write-Host "  CA:        https://ca.gla1v3.local" -ForegroundColor White
-if (docker ps --filter "name=wazuh-edr" --format "{{.Names}}" | Select-String "wazuh-edr") {
-    Write-Host "  Wazuh EDR: http://localhost:8443 (admin/SecretPassword)" -ForegroundColor White
-}
 Write-Host ""
 Write-Host "Default Credentials:" -ForegroundColor Cyan
 Write-Host "  Username: admin" -ForegroundColor White

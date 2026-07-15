@@ -28,10 +28,6 @@ services:
       - ALLOW_INSECURE_DEFAULTS=${ALLOW_INSECURE_DEFAULTS:-false}
       - GLA1V3_DOMAIN=${GLA1V3_DOMAIN}
       - AGENT_WHOAMI_TOKEN=${AGENT_WHOAMI_TOKEN}
-      - OPENSEARCH_URL=${OPENSEARCH_URL}
-      - OPENSEARCH_AUTH_METHOD=${OPENSEARCH_AUTH_METHOD}
-      - OPENSEARCH_USER=${OPENSEARCH_USER:-}
-      - OPENSEARCH_PASS=${OPENSEARCH_PASS:-}
       - JWT_SECRET=${JWT_SECRET}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - INTERNAL_TOKEN=${INTERNAL_TOKEN}
@@ -81,7 +77,6 @@ services:
       - "traefik.docker.network=infra_gla1v3-net"
     networks:
       - gla1v3-net
-      - wazuh-net
 
   frontend:
     build: ../frontend
@@ -142,5 +137,3 @@ networks:
   gla1v3-net:
     external: true
     name: infra_gla1v3-net
-  wazuh-net:
-    driver: bridge

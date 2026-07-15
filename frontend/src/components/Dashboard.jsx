@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
 import WorldMap from './WorldMap';
-import AlertTable from './AlertTable';
 import TaskPanel from './TaskPanel';
-import EDRManager from './EDRManager';
 import BuildAgent from './BuildAgent';
 import TenantSelector from './TenantSelector';
 import TenantManagement from './TenantManagement';
@@ -167,17 +165,6 @@ export default function Dashboard({ user, token, onLogout }) {
         {/* Content Panel */}
         <div style={{ flex: 1, overflow: 'auto' }}>
           {activeTab === 'home' && <DashboardHome token={token} user={user} />}
-          {activeTab === 'alerts' && (
-            <div style={{ padding: '2rem' }}>
-              <h2 style={{ margin: '0 0 1.5rem 0', color: '#c9d1d9' }}>🚨 EDR Alerts — Live Detections</h2>
-              <AlertTable />
-            </div>
-          )}
-          {activeTab === 'edr-config' && (
-            <div style={{ padding: '2rem' }}>
-              <EDRManager />
-            </div>
-          )}
           {activeTab === 'build' && (
             <div style={{ padding: '2rem' }}>
               <h2 style={{ margin: '0 0 1.5rem 0', color: '#c9d1d9' }}>🔨 Build Agent</h2>

@@ -78,15 +78,7 @@ const config = {
   internalToken: process.env.INTERNAL_TOKEN,
   agentWhoamiToken: process.env.AGENT_WHOAMI_TOKEN,
   saltRounds: 10,
-  
-  // OpenSearch
-  opensearch: {
-    url: process.env.OPENSEARCH_URL || 'http://opensearch:9200',
-    authMethod: process.env.OPENSEARCH_AUTH_METHOD || 'none',
-    user: process.env.OPENSEARCH_USER || '',
-    pass: process.env.OPENSEARCH_PASS || ''
-  },
-  
+
   // Certificates
   certDir: process.env.CERT_DIR || '/certs',
 

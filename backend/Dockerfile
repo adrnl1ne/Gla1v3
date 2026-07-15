@@ -17,8 +17,6 @@ COPY . .
 # Expose backend API and C2 ports
 EXPOSE 3000 3001
 
-# MVP: Run as root to access Wazuh alerts volume
-# TODO: In production, use proper volume permissions or API access
 
 # Start the backend server
 CMD ["node", "index.js"]

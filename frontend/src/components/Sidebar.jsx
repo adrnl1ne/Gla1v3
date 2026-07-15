@@ -5,8 +5,6 @@ export default function Sidebar({ activeTab, setActiveTab, user, isOpen, toggleS
   
   const menuItems = [
     { id: 'agents', label: 'Agents', icon: '🤖', roles: ['admin', 'operator'] },
-    { id: 'alerts', label: 'EDR Alerts', icon: '🚨', roles: ['admin', 'operator'] },
-    { id: 'edr-config', label: 'EDR Config', icon: '⚙️', roles: ['admin', 'operator'] },
     { id: 'build', label: 'Build Agent', icon: '🔨', roles: ['admin', 'operator'] },
     { id: 'tenants', label: 'Tenants', icon: '👥', roles: ['admin'] },
     { id: 'users', label: 'Users', icon: '👤', roles: ['admin'] },

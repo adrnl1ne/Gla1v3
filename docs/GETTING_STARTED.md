@@ -87,7 +87,8 @@ You should see containers for:
 - `gla1v3-backend` - API server
 - `gla1v3-ca-service` - Certificate authority
 - `gla1v3-traefik` - Reverse proxy
-- `wazuh-*` - EDR components
+- `postgres` - Database
+- `redis` - Cache layer
 
 ### Step 3.5: Verifying Your Setup
 
@@ -328,140 +329,33 @@ Manage agent tasks with three sections:
 - **Task History**: View results from completed tasks
 
 ### Alert Table
-Displays EDR alerts correlated with agent IDs. Shows detection events from integrated EDR systems (requires Wazuh EDR to be running).
+Displays security alerts correlated with agent IDs. The platform supports integration with external SIEM/EDR systems for enhanced threat detection.
 
-## EDR Integration (Optional)
+## SIEM/EDR Integration (Optional)
 
-The platform includes **Wazuh EDR** for advanced threat detection and monitoring. EDR integration is **optional** - the C2 platform works fully without it.
+The platform is designed to integrate with external SIEM and EDR systems for advanced threat detection and monitoring. Integration is **optional** - the C2 platform works fully without it.
 
-### Starting Wazuh EDR
+### Setting Up SIEM/EDR Integration
 
-The start scripts will automatically attempt to start Wazuh **only if** the `infra/wazuh` folder is present. If Wazuh is not configured or fails to start you may see:
+To integrate a SIEM/EDR system:
 
-```
-⚠️  Wazuh EDR failed to start (platform will work without EDR)
-```
+1. **Configure the integration endpoint** in your backend environment variables
+2. **Deploy monitoring agents** on target systems alongside Gla1v3 agents
+3. **Use the Alert Table** to view correlated detections from your integrated system
 
-This is **not a critical error** — the core C2 services (DB, backend, Redis, Traefik) will start independently because Wazuh is optional and no longer required by the top‑level compose configuration.
+### Integration Requirements
 
-### Manual Wazuh Startup
+- **SIEM/EDR system** of your choice
+- **Network connectivity** between Gla1v3 and your security tools
+- **API credentials** for the external system
 
-If you want to enable EDR monitoring:
+### Without SIEM/EDR
 
-**Windows:**
-```powershell
-cd infra\wazuh
-docker compose up -d
-```
-
-**Linux/Mac:**
-```bash
-cd infra/wazuh
-docker compose up -d
-```
-
-**Access Wazuh Dashboard:**
-- URL: `http://localhost:8443`
-- Username: `admin`
-- Password: `SecretPassword`
-
-#### Prerequisites for Wazuh
-- **Additional 4GB RAM** (total 12GB+ recommended)
-- **10GB disk space** for alert indexing
-- Main infrastructure must be running first
-
-#### Quick Start Commands
-**Start Wazuh + OpenSearch:**
-```powershell
-cd infra/wazuh
-docker compose up -d
-```
-
-**Verify services:**
-```powershell
-docker compose ps
-```
-Expected: `wazuh`, `opensearch`, `wazuh-indexer` containers running.
-
-#### Integrating with Gla1v3
-1. Start main C2 infra first: `cd infra && .\scripts\startup\start.ps1` (Windows) or `cd infra && ./scripts/startup/start.sh` (Linux/Mac)
-2. Wazuh will be available to the backend via configured API URL
-3. Use the dashboard `Alert Table` to view correlated EDR detections
-
-#### Deploying Wazuh Agents
-
-To get full EDR visibility, deploy Wazuh agents on your test/target machines alongside Gla1v3 agents:
-
-**Download Wazuh Agent:**
-- Visit: https://packages.wazuh.com/4.x/windows/wazuh-agent-4.x.x-x.msi (Windows)
-- Visit: https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/ (Linux)
-- Or use package managers: `apt install wazuh-agent` (Ubuntu/Debian)
-
-**Install and Configure:**
-
-**Windows:**
-```powershell
-# Download and install MSI
-msiexec /i wazuh-agent-4.x.x-x.msi /q WAZUH_MANAGER="localhost" WAZUH_REGISTRATION_SERVER="localhost"
-
-# Or configure after installation
-& "C:\Program Files (x86)\ossec-agent\agent-auth.exe" -m localhost
-& "C:\Program Files (x86)\ossec-agent\ossec-control.exe" start
-```
-
-**Linux:**
-```bash
-# Install package
-wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.x.x-x_amd64.deb
-sudo dpkg -i wazuh-agent_4.x.x-x_amd64.deb
-
-# Configure manager IP
-sudo sed -i 's/MANAGER_IP/localhost/g' /var/ossec/etc/ossec.conf
-
-# Register and start
-sudo /var/ossec/bin/agent-auth -m localhost
-sudo systemctl enable wazuh-agent
-sudo systemctl start wazuh-agent
-```
-
-**Verify Agent Connection:**
-```bash
-# Check agent status
-sudo /var/ossec/bin/ossec-control status
-
-# Check manager connection
-sudo tail -f /var/ossec/logs/ossec.log
-```
-
-**Expected**: Agent appears as "Active" in Wazuh Dashboard → Agents section
-
-#### Wazuh Access
-- **Wazuh API**: https://localhost:55001 (user: `wazuh` / pass: `wazuh`)
-- **Dashboard**: https://localhost:8443
-- **OpenSearch**: http://localhost:9200
-
-#### Wazuh Troubleshooting
-- **Agents not connecting**: Check Wazuh manager logs: `docker compose logs wazuh --tail 50`
-- **No alerts**: Ensure Wazuh agent can reach manager (port 1514) and check OpenSearch indices
-
-#### Wazuh Files & Locations
-- Compose file: `infra/wazuh/docker-compose.yml`
-- Rules: `infra/wazuh/wazuh-rules/`
-- Indexer helper: `infra/wazuh/wazuh-config/wazuh-indexer.sh`
-
-### Wazuh Requirements
-
-- **Additional 4GB RAM** for OpenSearch and Wazuh containers
-- **10GB disk space** for alert indexing
-- Main infrastructure must be running first (use `.\scripts\startup\start.ps1` on Windows or `./scripts/startup/start.sh` on Linux/Mac)
-
-### Without Wazuh
-
-If you skip Wazuh:
+If you skip SIEM/EDR integration:
 - ✅ All C2 functionality works (agents, tasks, beacons)
 - ✅ Agent monitoring and control fully operational
-- ❌ Alert correlation unavailable
-- ❌ EDR detections not shown in Alert Table
+- ✅ Core security features remain active
+- ℹ️ External threat detection requires separate SIEM/EDR setup
 
 ## Common Issues and Solutions
 
@@ -483,19 +377,9 @@ If you skip Wazuh:
 **Issue**: Docker containers fail to start  
 **Solutions**:
 - Ensure Docker Desktop is running
-- Check available RAM (need 8GB minimum for core, 12GB with Wazuh)
+- Check available RAM (need 8GB minimum for core services)
 - Review logs: `docker logs gla1v3-backend`
 - Try stopping and restarting: `docker compose down && docker compose up -d`
-
-### Wazuh Won't Start
-**Issue**: Wazuh EDR fails to start or shows errors  
-**Solutions**:
-- Ensure main infrastructure is running first (run `.\scripts\startup\start.ps1` on Windows or `./scripts/startup/start.sh` on Linux/Mac)
-- Check if you have 12GB+ RAM available (Wazuh needs 4GB extra)
-- Verify network exists: `docker network ls | grep wazuh-net`
-- Try manual start: `cd infra/wazuh && docker compose up -d`
-- View logs: `docker logs wazuh-edr`
-- **Remember**: Platform works fully without Wazuh - EDR is optional
 
 ### Wrong Geo-Location
 **Issue**: Agent shows incorrect location on map  
